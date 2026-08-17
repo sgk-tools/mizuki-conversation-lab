@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#f4f0ea">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Mizuki Lab">
+  <meta name="format-detection" content="telephone=no">
+  <title>Mizuki Conversation Lab</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <div class="identity">
+        <div class="avatar" aria-hidden="true"><span>美月</span></div>
+        <div class="identity-text">
+          <div class="name-row">
+            <strong>橘 美月</strong>
+            <span id="expressionBadge" class="expression-badge" hidden>normal</span>
+          </div>
+          <small>Mizuki Conversation Lab</small>
+        </div>
+      </div>
+      <button id="settingsBtn" class="icon-btn" aria-label="設定">⚙</button>
+    </header>
+
+    <section class="scenario-card" aria-label="現在のテスト状況">
+      <div class="scenario-head">
+        <div>
+          <span id="testNo" class="test-no">TEST 1</span>
+          <span id="testType" class="test-type" hidden></span>
+        </div>
+        <button id="nextScenarioBtn" class="secondary-btn">次のテスト</button>
+      </div>
+      <div id="scenarioSummary" class="scenario-summary"></div>
+      <div id="scenarioDate" class="scenario-date"></div>
+    </section>
+
+    <main id="chat" class="chat" aria-live="polite"></main>
+
+    <form id="composer" class="composer" autocomplete="off">
+      <textarea id="messageInput" rows="1" maxlength="500" placeholder="美月に話しかける…" aria-label="メッセージ"></textarea>
+      <button id="sendBtn" class="send-btn" type="submit">送信</button>
+    </form>
+  </div>
+
+  <div id="modalBackdrop" class="modal-backdrop" hidden></div>
+
+  <section id="settingsModal" class="sheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" hidden>
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <h2 id="settingsTitle">設定</h2>
+      <button class="icon-btn" data-close-sheet aria-label="閉じる">×</button>
+    </div>
+
+    <div class="setting-block">
+      <h3>呼び方</h3>
+      <label class="text-setting-label" for="callNameInput">美月からの呼ばれ方</label>
+      <input id="callNameInput" class="text-setting-input" type="text" maxlength="20" placeholder="例：シゲキさん">
+      <p class="hint">呼んでほしい形をそのまま入力する。空欄なら名前は使わない。会話中も必要な場面だけ、ときどき使用する。</p>
+    </div>
+
+    <div class="setting-row">
+      <div>
+        <strong>開発モード</strong>
+        <p>Thinkingと内部タグを表示する。</p>
+      </div>
+      <label class="switch">
+        <input id="debugToggle" type="checkbox">
+        <span></span>
+      </label>
+    </div>
+
+    <div class="setting-block">
+      <h3>データ</h3>
+      <button id="exportBtn" class="wide-btn">評価・会話データをJSON出力</button>
+      <p class="hint">会話内容・評価・想定状況は端末内に保存される。外部AI APIは使用しない。</p>
+    </div>
+
+    <div class="setting-block danger-zone">
+      <h3>開発用リセット</h3>
+      <button id="clearConversationBtn" class="wide-btn danger-light">会話履歴をクリア</button>
+      <button id="clearMemoryBtn" class="wide-btn danger-light">Memoryをクリア</button>
+      <button id="clearEvaluationsBtn" class="wide-btn danger-light">評価データをクリア</button>
+    </div>
+
+    <div class="setting-block app-info">
+      <h3>アプリ情報</h3>
+      <p>Mizuki Conversation Lab</p>
+      <p>Logic v0.1.1</p>
+      <p id="storageStatus">保存: localStorage</p>
+    </div>
+  </section>
+
+  <section id="scenarioModal" class="sheet" role="dialog" aria-modal="true" aria-labelledby="scenarioTitle" hidden>
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <h2 id="scenarioTitle">テスト条件</h2>
+      <button class="icon-btn" data-close-sheet aria-label="閉じる">×</button>
+    </div>
+    <div id="scenarioDetails" class="scenario-details"></div>
+    <button id="regenerateScenarioBtn" class="wide-btn">このTESTだけ条件を作り直す</button>
+    <p class="hint">通常は自動生成のまま使用する。組合せの偏りを減らすため、未検証の2因子組合せを優先する。</p>
+  </section>
+
+  <template id="messageTemplate">
+    <article class="message-row">
+      <div class="message-meta"></div>
+      <div class="bubble"></div>
+      <div class="evaluation" hidden>
+        <button type="button" data-eval="natural">自然</button>
+        <button type="button" data-eval="unnatural">不自然</button>
+      </div>
+      <div class="correction" hidden>
+        <div class="issue-chips" aria-label="不自然だった理由">
+          <button type="button" data-issue="overpraise">褒めすぎ</button>
+          <button type="button" data-issue="assumption">決めつけ</button>
+          <button type="button" data-issue="advice_unneeded">助言不要</button>
+          <button type="button" data-issue="repetition">同じ話</button>
+          <button type="button" data-issue="too_long">長い</button>
+          <button type="button" data-issue="wording">言い方</button>
+          <button type="button" data-issue="question">質問過多</button>
+          <button type="button" data-issue="other">その他</button>
+        </div>
+        <textarea rows="2" maxlength="300" placeholder="自分ならこう言う（任意）"></textarea>
+        <button type="button" class="save-correction">改善例を保存</button>
+      </div>
+      <details class="thinking" hidden>
+        <summary>Thinking</summary>
+        <pre></pre>
+      </details>
+    </article>
+  </template>
+
+  <script src="conversation-engine.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
