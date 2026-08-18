@@ -127,7 +127,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.1.6 single HTML</div>
+    <div class="version">Mizuki Conversation Lab v0.1.7 single HTML</div>
   </div>
 </div>
 
@@ -135,7 +135,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.1.6-single';
+const VERSION='0.1.7-single';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -144,7 +144,7 @@ const K={
   scenario:'mcl_scenario_v012',
   testNo:'mcl_test_no_v012',
   coverage:'mcl_coverage_v012',
-  dialogState:'mcl_dialog_state_v016'
+  dialogState:'mcl_dialog_state_v017'
 };
 const $=s=>document.querySelector(s);
 const load=(k,d)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}};
@@ -253,8 +253,11 @@ function classify(text){
   // Explicit conversational intent has priority over schedule/work keywords.
   const wantsStopTalk =
     /話しかけなくていい|話さなくていい|話しかけないで|今は.{0,8}(話さなくて|話しかけなくて|静かに)|静かにして|黙ってて|また後で.{0,6}(話|聞)|今はいいよ|今は大丈夫/.test(t);
+  const memoryCursorActive=!!dialogState.memoryCursorId;
+  const terseMemoryNav = memoryCursorActive &&
+    /^(?:じゃあ[、, ]*)?(?:その前(?:は)?|もう一つ前(?:は)?|もうひとつ前(?:は)?|さらに前(?:は)?|そのあと(?:もう一つ|もうひとつ)?(?:は)?|もう一つあと(?:は)?|もうひとつあと(?:は)?|さらにそのあと(?:は)?|その次(?:は)?|次(?:は)?)[？?。 ]*$/.test(t);
   const wantsMemory =
-    /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,20}(話した|言った|って話)|その前.{0,12}(何て|なんて|言った)|もう一つ前|もうひとつ前|さらに前|さっきの話|そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)/.test(t);
+    /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,20}(話した|言った|って話)|その前(?:は)?[？?。 ]*$|その前.{0,12}(何て|なんて|言った)|もう一つ前|もうひとつ前|さらに前|さっきの話|そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)|そのあと.{0,8}(もう一つ|もうひとつ)|もう一つあと|もうひとつあと|さらにそのあと/.test(t) || terseMemoryNav;
   const wantsSmalltalk =
     /雑談しよう|雑談しよ|少し.{0,5}(話そう|話しよう|お話ししよう)|ちょっと.{0,5}(話そう|話しよう)|話し相手|雑談したい|楽しい話|何か.{0,8}話題.{0,6}(出して|ちょうだい|出せ)|美月から.{0,12}(話題|話して|何か)|そっちから.{0,10}(話して|話題)|仕事の話.{0,6}(じゃなく|以外)|仕事以外.{0,8}(話|雑談)|普通の雑談/.test(t);
   const wantsAdvice =
@@ -360,7 +363,9 @@ function semanticGroup(value){
 function recentMeaningGroups(n=8){return recentMizuki(n).map(x=>x.semanticGroup||semanticGroup(x.meaningKey||x.semanticMeaning))}
 function hasRecentGroup(group,n=8){return recentMeaningGroups(n).includes(group)}
 function isMemoryRequestText(text=''){
-  return /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,20}(話した|言った|って話)|その前.{0,12}(何て|なんて|言った)|もう一つ前|もうひとつ前|さらに前|さっきの話|そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)/.test(text);
+  const t=(text||'').trim();
+  const terse=!!dialogState.memoryCursorId && /^(?:じゃあ[、, ]*)?(?:その前(?:は)?|もう一つ前(?:は)?|もうひとつ前(?:は)?|さらに前(?:は)?|そのあと(?:もう一つ|もうひとつ)?(?:は)?|もう一つあと(?:は)?|もうひとつあと(?:は)?|さらにそのあと(?:は)?|その次(?:は)?|次(?:は)?)[？?。 ]*$/.test(t);
+  return /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,20}(話した|言った|って話)|その前(?:は)?[？?。 ]*$|その前.{0,12}(何て|なんて|言った)|もう一つ前|もうひとつ前|さらに前|さっきの話|そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)|そのあと.{0,8}(もう一つ|もうひとつ)|もう一つあと|もうひとつあと|さらにそのあと/.test(t) || terse;
 }
 function substantiveUserHistory(){
   // speak() is called after the current user message is appended, so exclude the final user item.
@@ -405,7 +410,7 @@ function memoryReply(text='',info=null){
   let target=null;
   let mode='latest';
 
-  const wantsNext=/そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)/.test(text);
+  const wantsNext=/そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)|そのあと.{0,8}(もう一つ|もうひとつ)|もう一つあと|もうひとつあと|さらにそのあと|その次|^(?:じゃあ[、, ]*)?次(?:は)?[？?。 ]*$/.test(text);
   const wantsPrev=/その前|もう一つ前|もうひとつ前|さらに前/.test(text);
 
   if(wantsNext){
@@ -489,7 +494,7 @@ function candidatesFor(info,text){
   }
   if(info.semanticMeaning==='memory_request'){
     const prev=/その前|もう一つ前|もうひとつ前|さらに前/.test(text);
-    const next=/そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)/.test(text);
+    const next=/そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)|そのあと.{0,8}(もう一つ|もうひとつ)|もう一つあと|もうひとつあと|さらにそのあと|その次|^(?:じゃあ[、, ]*)?次(?:は)?[？?。 ]*$/.test(text);
     c.push(candidate('memory',next?'memory_recall_next':(prev?'memory_recall_previous':'memory_recall'),'inform','memory_recall',memoryReply(text,info),'normal',22,'memory_request'));
     return c;
   }
