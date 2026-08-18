@@ -127,7 +127,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.1.4 single HTML</div>
+    <div class="version">Mizuki Conversation Lab v0.1.5 single HTML</div>
   </div>
 </div>
 
@@ -135,7 +135,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.1.4-single';
+const VERSION='0.1.5-single';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -251,6 +251,8 @@ function classify(text){
   // Explicit conversational intent has priority over schedule/work keywords.
   const wantsStopTalk =
     /話しかけなくていい|話さなくていい|話しかけないで|今は.{0,8}(話さなくて|話しかけなくて|静かに)|静かにして|黙ってて|また後で.{0,6}(話|聞)|今はいいよ|今は大丈夫/.test(t);
+  const wantsMemory =
+    /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,16}(話した|言った)|その前.{0,12}(何て|なんて|言った)|もう一つ前|もうひとつ前|さらに前|さっきの話/.test(t);
   const wantsSmalltalk =
     /雑談しよう|雑談しよ|少し.{0,5}(話そう|話しよう|お話ししよう)|ちょっと.{0,5}(話そう|話しよう)|話し相手|雑談したい/.test(t);
   const wantsAdvice =
@@ -259,13 +261,29 @@ function classify(text){
   const wantsNothingSpecial = /特に.{0,8}(話すこと|話題).{0,5}ない|話すこと.{0,5}ない|何も.{0,5}(ない|話さない)|特に.{0,5}ないな/.test(t);
   const hasNoSchedule = /特に.{0,6}予定.{0,5}ない|予定.{0,4}(ない|なし)|予定は.{0,4}ない|何も予定.{0,4}ない/.test(t);
 
+  // Relations and progress phrases found in TEST 9-12.
+  const endAfterMeeting =
+    /(?:この|その)?(?:打合せ|会議)(?:さえ)?(?:が)?終われば.{0,18}(?:帰れ|帰る|終わり|終わる|一区切り)|(?:打合せ|会議)(?:さえ)?(?:が)?終われば|(?:打合せ|会議)が終わったら.{0,18}(?:帰れ|帰る|終わり|一区切り)/.test(t);
+  const endAfterOne =
+    /(?:あと|残り).{0,8}(?:一つ|1つ|ひとつ|一件|1件).{0,12}(?:やれば|終えれば|片づけば|終われば).{0,12}(?:終わり|終わる|帰れ|帰る|一区切り)/.test(t);
+  const remainingOne =
+    /(?:残り(?:は|が)?\s*(?:あと)?|あと)\s*(?:一つ|1つ|ひとつ|一件|1件)(?:だけ)?/.test(t);
+  const progressPositive =
+    /(?:だいぶ|結構|かなり).{0,6}(?:進ん|はかど|捗|片づ|片付|終わ)|(?:はかど|捗)った|順調に.{0,6}進ん/.test(t);
+
   // Collect multiple meanings instead of stopping at the first match.
   if(/休日出勤|休み.{0,8}(仕事|出勤)|休日.{0,8}(仕事|出勤)/.test(t)) add('work_status','holiday_work');
   if(/仕事.{0,8}(終わった|終わり|おしまい)|退勤|勤務.{0,5}終了/.test(t) && !/一つ|1つ|ひとつ|一件/.test(t)) add('work_status','after_work');
   if(/休み|休日/.test(t) && !found.some(x=>x.semanticMeaning==='holiday_work')) add('work_status','holiday');
-  if(/一つ.{0,8}(終わ|片づ|完了)|1つ.{0,8}(終わ|片づ|完了)|ひとつ.{0,8}(終わ|片づ|完了)|一件.{0,8}(終わ|片づ|完了)/.test(t)) add('completion','task_completed_one');
-  if(/複数|何件か|だいぶ.{0,5}片|かなり.{0,5}片|いくつか.{0,8}(終わ|片づ|完了)/.test(t)) add('completion','task_completed_multiple');
-  if(/まだ.{0,12}残|結構.{0,8}残|かなり.{0,8}残|残って(る|いる)|残りが/.test(t)) add('workload','work_remaining');
+
+  if(endAfterMeeting) add('relation','end_after_meeting');
+  if(endAfterOne) add('relation','end_after_one');
+  if(remainingOne) add('progress','remaining_one');
+  if(progressPositive) add('progress','progress_positive');
+
+  if(!remainingOne && !endAfterOne && /一つ.{0,8}(終わ|片づ|片付|完了)|1つ.{0,8}(終わ|片づ|片付|完了)|ひとつ.{0,8}(終わ|片づ|片付|完了)|一件.{0,8}(終わ|片づ|片付|完了)/.test(t)) add('completion','task_completed_one');
+  if(/複数|何件か|だいぶ.{0,5}(片|終わ)|かなり.{0,5}(片|終わ)|いくつか.{0,8}(終わ|片づ|片付|完了)|結構.{0,5}(片づ|片付)/.test(t)) add('completion','task_completed_multiple');
+  if(!remainingOne && /まだ.{0,12}残|結構.{0,8}残|かなり.{0,8}残|残って(る|いる)|残りが/.test(t)) add('workload','work_remaining');
   if(/疲れた|疲れたな|くたくた/.test(t)) add('condition','user_tired');
   if(/忙しい|仕事.{0,5}(多い|多め)|仕事も多い|多いんだ|多いな/.test(t)) add('workload','work_heavy');
   if(/暇|仕事.{0,5}(少ない|少なめ)|少ないな/.test(t) && !/美月/.test(t)) add('workload','work_light');
@@ -281,11 +299,12 @@ function classify(text){
   if(wantsOpinion) add('question','ask_mizuki_opinion');
   if(wantsNothingSpecial) add('smalltalk','nothing_special');
   if(wantsSmalltalk) add('smalltalk','smalltalk_request');
+  if(wantsMemory) add('memory','memory_request');
   if(wantsStopTalk) add('conversation_control','silence_request');
 
-  // User control intent > explicit request > interpretation of content.
+  // User control / direct requests / explicit relations > scenario interpretation.
   let primary=null;
-  const priority=['silence_request','smalltalk_request','ask_advice','nothing_special','ask_mizuki_opinion','no_schedule'];
+  const priority=['silence_request','memory_request','smalltalk_request','ask_advice','end_after_meeting','end_after_one','remaining_one','progress_positive','nothing_special','ask_mizuki_opinion','no_schedule'];
   for(const p of priority){
     const hit=found.find(x=>x.semanticMeaning===p);
     if(hit){primary=hit;break;}
@@ -307,6 +326,7 @@ function classify(text){
     wantsNothingSpecial,
     wantsSmalltalk,
     wantsStopTalk,
+    wantsMemory,
     hasNoSchedule
   };
 }
@@ -317,6 +337,10 @@ function semanticGroup(value){
   const v=value||'';
   if(['work_heavy','work_remaining','one_done_but_heavy','multiple_done_but_heavy','acknowledge_heavy_work','acknowledge_remaining','heavy_and_late','late_heavy_work'].some(k=>v.includes(k))) return 'workload_high';
   if(['task_completed_one','task_completed_multiple','acknowledge_one_completion','one_completion_observe','acknowledge_multiple_completion','multiple_completion_observe'].some(k=>v.includes(k))) return 'completion';
+  if(['progress_positive','progress_positive_ack','progress_positive_outing'].some(k=>v.includes(k))) return 'progress_positive';
+  if(['remaining_one','remaining_one_ack','end_after_one','end_after_one_ack'].some(k=>v.includes(k))) return 'remaining_one';
+  if(['end_after_meeting','end_after_meeting_ack'].some(k=>v.includes(k))) return 'end_after_meeting';
+  if(['memory_request','memory_recall','memory_recall_previous'].some(k=>v.includes(k))) return 'memory_request';
   if(['meeting_soon','acknowledge_meeting','meeting_question','context_next_meeting'].some(k=>v.includes(k))) return 'meeting';
   if(['outing_soon','acknowledge_outing','context_next_outing'].some(k=>v.includes(k))) return 'outing';
   if(['smalltalk_request','smalltalk_accept','quiet_day','nothing_special_response','mizuki_not_busy','quiet_moment'].some(k=>v.includes(k))) return 'smalltalk';
@@ -326,6 +350,39 @@ function semanticGroup(value){
 }
 function recentMeaningGroups(n=8){return recentMizuki(n).map(x=>x.semanticGroup||semanticGroup(x.meaningKey||x.semanticMeaning))}
 function hasRecentGroup(group,n=8){return recentMeaningGroups(n).includes(group)}
+function isMemoryRequestText(text=''){
+  return /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,16}(話した|言った)|その前.{0,12}(何て|なんて|言った)|もう一つ前|もうひとつ前|さらに前|さっきの話/.test(text);
+}
+function substantiveUserHistory(){
+  // speak() is called after the current user message is appended, so exclude the final user item.
+  const users=history.filter(x=>x.speaker==='user');
+  const prior=users.slice(0,-1);
+  return prior.filter(x=>!isMemoryRequestText(x.text||''));
+}
+function cleanQuote(text=''){
+  return text.trim().replace(/[。！？!?]+$/,'');
+}
+function memoryReply(text=''){
+  const items=substantiveUserHistory();
+  if(!items.length) return '確認できる以前の発言はまだありません。';
+  let back=0;
+  if(/その前/.test(text)) back=1;
+  if(/もう一つ前|もうひとつ前|さらに前/.test(text)) back=2;
+  const target=items[items.length-1-back];
+  if(!target) return 'そこまでは確認できません。';
+  const q=cleanQuote(target.text||'');
+  if(/覚えて/.test(text)) return `はい。「${q}」と言っていましたね。`;
+  if(back>0) return `その前は「${q}」と言っていましたね。`;
+  return `「${q}」と言っていましたね。`;
+}
+function progressPositiveReply(text='',withOuting=false){
+  let first='今日はだいぶ進んだんですね。';
+  if(/はかど|捗/.test(text)) first='今日は結構はかどったんですね。';
+  else if(/片づ|片付/.test(text)) first='いくつか片づいたんですね。';
+  else if(/終わ/.test(text)) first='今日はだいぶ片づいたんですね。';
+  return withOuting ? `${first}このあとは外出なんですね。` : first;
+}
+
 function patternPenalty(pattern){
   const recent=recentMizuki(12);
   const count=recent.filter(x=>x.phrasePattern===pattern).length;
@@ -347,9 +404,14 @@ function candidatesFor(info,text){
   const meanings=new Set(info.semanticMeanings||[info.semanticMeaning]);
   const has=m=>meanings.has(m);
 
-  // Conversation-control requests are terminal: no advice, schedule reading, or extra small talk.
+  // Direct conversation-control and memory requests are terminal.
   if(info.semanticMeaning==='silence_request'){
     c.push(candidate('conversation_control','silence_ack','none','silence_short','わかりました。今は静かにしておきますね。','normal',20,'silence'));
+    return c;
+  }
+  if(info.semanticMeaning==='memory_request'){
+    const prev=/その前|もう一つ前|もうひとつ前|さらに前/.test(text);
+    c.push(candidate('memory',prev?'memory_recall_previous':'memory_recall','inform','memory_recall',memoryReply(text),'normal',22,'memory_request'));
     return c;
   }
   if(info.semanticMeaning==='smalltalk_request'){
@@ -380,7 +442,37 @@ function candidatesFor(info,text){
     return c;
   }
 
+  // Explicit relation: meeting completion leads to the end of work.
+  if(info.semanticMeaning==='end_after_meeting'){
+    let reply='この打合せが終われば、今日は一区切りなんですね。';
+    if(/帰れ|帰る/.test(text)) reply='この打合せが終われば、今日は帰れるんですね。';
+    if(has('work_heavy')) reply='仕事は多いものの、この打合せが終われば今日は一区切りなんですね。';
+    c.push(candidate('relation','end_after_meeting_ack','observe','relation_ack',reply,'normal',20,'end_after_meeting'));
+    return c;
+  }
+
+  // Explicit relation: one remaining item leads to the end of work.
+  if(info.semanticMeaning==='end_after_one'){
+    c.push(candidate('relation','end_after_one_ack','observe','relation_ack','あと一つ終われば、今日は一区切りなんですね。','normal',20,'remaining_one'));
+    return c;
+  }
+  if(info.semanticMeaning==='remaining_one'){
+    const reply=s.completed==='複数完了'
+      ? 'いくつか片づいて、残りはあと一つなんですね。'
+      : '残りはあと一つなんですね。';
+    c.push(candidate('progress','remaining_one_ack','observe','observation_only',reply,'normal',18,'remaining_one'));
+    return c;
+  }
+
+  if(info.semanticMeaning==='progress_positive'){
+    c.push(candidate('progress',s.nextPlan==='外出'?'progress_positive_outing':'progress_positive_ack','observe',s.nextPlan==='外出'?'combined_observation':'observation_only',progressPositiveReply(text,s.nextPlan==='外出'),'smile',17,'progress_positive'));
+    return c;
+  }
+
   // Multiple meanings in one user utterance.
+  if(has('late_time') && has('meeting_soon')){
+    c.push(candidate('schedule','late_with_meeting','observe','combined_observation','もう遅い時間なのに、このあと打合せもあるんですね。','normal',18,'meeting'));
+  }
   if(has('task_completed_one') && has('work_remaining')){
     c.push(candidate('completion','one_done_work_remaining','observe','combined_observation','一つ終わったものの、まだ結構残っているんですね。','normal',14,'workload_high'));
   }
@@ -407,6 +499,7 @@ function candidatesFor(info,text){
       }
       break;
     case 'task_completed_multiple':
+      if(s.nextPlan==='外出') c.push(candidate('completion','multiple_done_then_outing','observe','combined_observation','いくつか片づいたところで、このあとは外出なんですね。','normal',13,'completion'));
       c.push(candidate('completion','acknowledge_multiple_completion','react','reaction_short','いくつか片づいたんですね。','smile',9,'completion'));
       c.push(candidate('completion','multiple_completion_observe','observe','observation_only','今日はだいぶ進んだようですね。','normal',7,'completion'));
       break;
@@ -429,10 +522,12 @@ function candidatesFor(info,text){
       c.push(candidate('workload','acknowledge_light_work','observe','observation_only','今日は少し余裕があるんですね。','normal',8));
       break;
     case 'meeting_soon':
+      if(s.completed==='複数完了'&&s.testType==='contextCombination') c.push(candidate('schedule','multiple_done_then_meeting','observe','combined_observation','いくつか片づいたところで、このあとは打合せなんですね。','normal',12,'meeting'));
       c.push(candidate('schedule','acknowledge_meeting','react','reaction_short','これから打合せなんですね。','normal',8,'meeting'));
       if(recentQuestions()===0)c.push(candidate('schedule','meeting_question','ask','question_followup','その打合せ、長くなりそうですか。','normal',6,'meeting'));
       break;
     case 'outing_soon':
+      if(s.completed==='複数完了') c.push(candidate('schedule','multiple_done_then_outing','observe','combined_observation','いくつか片づいたところで、このあとは外出なんですね。','normal',14,'outing'));
       c.push(candidate('schedule','acknowledge_outing','react','reaction_short','これから外出なんですね。','normal',8,'outing'));
       break;
     case 'work_tomorrow':
@@ -460,14 +555,16 @@ function candidatesFor(info,text){
       if(recentQuestions()===0)c.push(candidate('smalltalk','unknown_followup','ask','question_followup','もう少し聞かせてもらえますか。','normal',4));
   }
 
-  // Scenario context is a low-priority alternative only when no explicit conversational request exists.
-  if(s.nextPlan==='打合せ' && info.semanticMeaning!=='meeting_soon') c.push(candidate('schedule','context_next_meeting','inform','observation_only','次は打合せの予定ですね。','normal',4,'meeting'));
-  else if(s.nextPlan==='外出' && info.semanticMeaning!=='outing_soon') c.push(candidate('schedule','context_next_outing','inform','observation_only','次は外出の予定ですね。','normal',4,'outing'));
-  else if(s.completed==='複数完了' && info.semanticMeaning!=='task_completed_multiple' && info.semanticMeaning!=='after_work') c.push(candidate('completion','context_multiple_done','observe','observation_only','今日はすでにいくつか終わっているんですね。','normal',4,'completion'));
-  else if(s.workload==='多い' && info.semanticMeaning!=='work_heavy' && info.semanticMeaning!=='work_remaining') c.push(candidate('workload','context_heavy','observe','observation_only','今日は仕事量が多めですね。','normal',3,'workload_high'));
+  // Scenario-only observations are fallback choices. Never let them override a recognized user meaning.
+  if(info.semanticMeaning==='unknown'){
+    if(s.nextPlan==='打合せ') c.push(candidate('schedule','context_next_meeting','inform','observation_only','次は打合せの予定ですね。','normal',4,'meeting'));
+    else if(s.nextPlan==='外出') c.push(candidate('schedule','context_next_outing','inform','observation_only','次は外出の予定ですね。','normal',4,'outing'));
+    else if(s.completed==='複数完了') c.push(candidate('completion','context_multiple_done','observe','observation_only','今日はすでにいくつか終わっているんですね。','normal',4,'completion'));
+    else if(s.workload==='多い') c.push(candidate('workload','context_heavy','observe','observation_only','今日は仕事量が多めですね。','normal',3,'workload_high'));
 
-  if((s.timeBand==='夕方'||s.timeBand==='夜') && s.dayType==='金曜') c.push(candidate('smalltalk','friday_evening','smalltalk','smalltalk_time','金曜もそろそろ終盤ですね。','normal',3,'smalltalk'));
-  if(s.dayType==='日曜' && (s.timeBand==='夕方'||s.timeBand==='夜')) c.push(candidate('smalltalk','sunday_evening','smalltalk','smalltalk_time','もう日曜日の夕方ですね。','normal',3,'smalltalk'));
+    if((s.timeBand==='夕方'||s.timeBand==='夜') && s.dayType==='金曜') c.push(candidate('smalltalk','friday_evening','smalltalk','smalltalk_time','金曜もそろそろ終盤ですね。','normal',3,'smalltalk'));
+    if(s.dayType==='日曜' && (s.timeBand==='夕方'||s.timeBand==='夜')) c.push(candidate('smalltalk','sunday_evening','smalltalk','smalltalk_time','もう日曜日の夕方ですね。','normal',3,'smalltalk'));
+  }
 
   return c;
 }
