@@ -127,7 +127,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.1.5 single HTML</div>
+    <div class="version">Mizuki Conversation Lab v0.1.6 single HTML</div>
   </div>
 </div>
 
@@ -135,7 +135,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.1.5-single';
+const VERSION='0.1.6-single';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -143,7 +143,8 @@ const K={
   longMemory:'mcl_long_memory_v012',
   scenario:'mcl_scenario_v012',
   testNo:'mcl_test_no_v012',
-  coverage:'mcl_coverage_v012'
+  coverage:'mcl_coverage_v012',
+  dialogState:'mcl_dialog_state_v016'
 };
 const $=s=>document.querySelector(s);
 const load=(k,d)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}};
@@ -156,6 +157,7 @@ let evaluations=load(K.evals,[]);
 let longMemory=load(K.longMemory,[]);
 let coverage=load(K.coverage,{pairs:{},usedScenarios:[]});
 let testNo=load(K.testNo,1);
+let dialogState=load(K.dialogState,{memoryCursorId:null,suppressWork:false});
 
 const levels={
   workStatus:['通常勤務','休日','休日出勤','勤務終了後'],
@@ -252,11 +254,11 @@ function classify(text){
   const wantsStopTalk =
     /話しかけなくていい|話さなくていい|話しかけないで|今は.{0,8}(話さなくて|話しかけなくて|静かに)|静かにして|黙ってて|また後で.{0,6}(話|聞)|今はいいよ|今は大丈夫/.test(t);
   const wantsMemory =
-    /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,16}(話した|言った)|その前.{0,12}(何て|なんて|言った)|もう一つ前|もうひとつ前|さらに前|さっきの話/.test(t);
+    /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,20}(話した|言った|って話)|その前.{0,12}(何て|なんて|言った)|もう一つ前|もうひとつ前|さらに前|さっきの話|そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)/.test(t);
   const wantsSmalltalk =
-    /雑談しよう|雑談しよ|少し.{0,5}(話そう|話しよう|お話ししよう)|ちょっと.{0,5}(話そう|話しよう)|話し相手|雑談したい/.test(t);
+    /雑談しよう|雑談しよ|少し.{0,5}(話そう|話しよう|お話ししよう)|ちょっと.{0,5}(話そう|話しよう)|話し相手|雑談したい|楽しい話|何か.{0,8}話題.{0,6}(出して|ちょうだい|出せ)|美月から.{0,12}(話題|話して|何か)|そっちから.{0,10}(話して|話題)|仕事の話.{0,6}(じゃなく|以外)|仕事以外.{0,8}(話|雑談)|普通の雑談/.test(t);
   const wantsAdvice =
-    /どうしたら|どうすれば|アドバイス|助言|何を.{0,12}(すれば|したら|確認|気をつけ)|何か.{0,12}(気をつけ|した方|すべき)|気をつけた方がいい|確認しておけばいい|確認すればいい|どうした方がいい/.test(t);
+    /どうしたら|どうすれば|アドバイス|助言|何を.{0,16}(すれば|したら|確認|気をつけ|基準|決めれば|残す)|何か.{0,12}(気をつけ|した方|すべき)|気をつけた方がいい|確認しておけばいい|確認すればいい|どうした方がいい|どうやって.{0,12}(決め|選)|何を基準|基準に.{0,12}(決め|選)|期限.{0,8}同じ|どっち.{0,12}(先|優先)|何を残す|残すか.{0,12}(決め|選)/.test(t);
   const wantsOpinion = /どう思う|美月.{0,8}どう/.test(t);
   const wantsNothingSpecial = /特に.{0,8}(話すこと|話題).{0,5}ない|話すこと.{0,5}ない|何も.{0,5}(ない|話さない)|特に.{0,5}ないな/.test(t);
   const hasNoSchedule = /特に.{0,6}予定.{0,5}ない|予定.{0,4}(ない|なし)|予定は.{0,4}ない|何も予定.{0,4}ない/.test(t);
@@ -270,6 +272,8 @@ function classify(text){
     /(?:残り(?:は|が)?\s*(?:あと)?|あと)\s*(?:一つ|1つ|ひとつ|一件|1件)(?:だけ)?/.test(t);
   const progressPositive =
     /(?:だいぶ|結構|かなり).{0,6}(?:進ん|はかど|捗|片づ|片付|終わ)|(?:はかど|捗)った|順調に.{0,6}進ん/.test(t);
+  const restWindow = /(?:打合せ|会議).{0,8}(?:まで|前).{0,10}(?:少し)?時間.{0,6}(?:ある|空いて)|(?:少し)?時間.{0,6}(?:ある|空いて).{0,10}(?:打合せ|会議)/.test(t);
+  const restIntent = /(?:10|１０|5|５|15|１５|20|２０)?\s*分.{0,8}休(?:もう|む|みたい)|少し.{0,6}休(?:もう|む|みたい)|休憩(?:しよう|する|したい)|休もうかな/.test(t);
 
   // Collect multiple meanings instead of stopping at the first match.
   if(/休日出勤|休み.{0,8}(仕事|出勤)|休日.{0,8}(仕事|出勤)/.test(t)) add('work_status','holiday_work');
@@ -280,14 +284,16 @@ function classify(text){
   if(endAfterOne) add('relation','end_after_one');
   if(remainingOne) add('progress','remaining_one');
   if(progressPositive) add('progress','progress_positive');
+  if(restWindow) add('condition','rest_window');
+  if(restIntent) add('condition','rest_intent');
 
   if(!remainingOne && !endAfterOne && /一つ.{0,8}(終わ|片づ|片付|完了)|1つ.{0,8}(終わ|片づ|片付|完了)|ひとつ.{0,8}(終わ|片づ|片付|完了)|一件.{0,8}(終わ|片づ|片付|完了)/.test(t)) add('completion','task_completed_one');
   if(/複数|何件か|だいぶ.{0,5}(片|終わ)|かなり.{0,5}(片|終わ)|いくつか.{0,8}(終わ|片づ|片付|完了)|結構.{0,5}(片づ|片付)/.test(t)) add('completion','task_completed_multiple');
   if(!remainingOne && /まだ.{0,12}残|結構.{0,8}残|かなり.{0,8}残|残って(る|いる)|残りが/.test(t)) add('workload','work_remaining');
-  if(/疲れた|疲れたな|くたくた/.test(t)) add('condition','user_tired');
-  if(/忙しい|仕事.{0,5}(多い|多め)|仕事も多い|多いんだ|多いな/.test(t)) add('workload','work_heavy');
-  if(/暇|仕事.{0,5}(少ない|少なめ)|少ないな/.test(t) && !/美月/.test(t)) add('workload','work_light');
-  if(/今から.{0,8}(打合せ|会議)|これから.{0,8}(打合せ|会議)|打合せ|会議/.test(t)) add('schedule','meeting_soon');
+  if(/疲れた|疲れたな|くたくた|しんどい/.test(t)) add('condition','user_tired');
+  if(/忙しい|仕事.{0,7}(多い|多め|多かった)|仕事も多い|多いんだ|多いな|仕事量.{0,6}多/.test(t)) add('workload','work_heavy');
+  if(/暇|仕事.{0,5}(少ない|少なめ|少なかった)|少ないな/.test(t) && !/美月/.test(t)) add('workload','work_light');
+  if(/今から.{0,8}(打合せ|会議)|これから.{0,8}(打合せ|会議)|このあと.{0,8}(打合せ|会議)|打合せ|会議/.test(t)) add('schedule','meeting_soon');
   if(/外出|出かけ|移動/.test(t)) add('schedule','outing_soon');
   if(/明日.{0,8}仕事|明日も/.test(t)) add('schedule','work_tomorrow');
   if(/21時|22時|23時|夜遅|こんな時間|もう.{0,5}時/.test(t)) add('time','late_time');
@@ -304,7 +310,7 @@ function classify(text){
 
   // User control / direct requests / explicit relations > scenario interpretation.
   let primary=null;
-  const priority=['silence_request','memory_request','smalltalk_request','ask_advice','end_after_meeting','end_after_one','remaining_one','progress_positive','nothing_special','ask_mizuki_opinion','no_schedule'];
+  const priority=['silence_request','memory_request','smalltalk_request','ask_advice','rest_intent','rest_window','end_after_meeting','end_after_one','remaining_one','progress_positive','nothing_special','ask_mizuki_opinion','no_schedule'];
   for(const p of priority){
     const hit=found.find(x=>x.semanticMeaning===p);
     if(hit){primary=hit;break;}
@@ -331,8 +337,10 @@ function classify(text){
   };
 }
 function recentMizuki(n=8){return history.filter(x=>x.speaker==='mizuki'&&x.mainTopic!=='system').slice(-n)}
+function recentUser(n=8){return history.filter(x=>x.speaker==='user').slice(-n)}
 function recentQuestions(){return recentMizuki(3).filter(x=>x.intent==='ask').length}
 function hasRecentMeaning(key,n=8){return recentMizuki(n).some(x=>x.meaningKey===key)}
+function recentUserHasMeaning(key,n=8){return recentUser(n).some(x=>(x.semanticMeanings||[x.semanticMeaning]).includes(key))}
 function semanticGroup(value){
   const v=value||'';
   if(['work_heavy','work_remaining','one_done_but_heavy','multiple_done_but_heavy','acknowledge_heavy_work','acknowledge_remaining','heavy_and_late','late_heavy_work'].some(k=>v.includes(k))) return 'workload_high';
@@ -340,18 +348,19 @@ function semanticGroup(value){
   if(['progress_positive','progress_positive_ack','progress_positive_outing'].some(k=>v.includes(k))) return 'progress_positive';
   if(['remaining_one','remaining_one_ack','end_after_one','end_after_one_ack'].some(k=>v.includes(k))) return 'remaining_one';
   if(['end_after_meeting','end_after_meeting_ack'].some(k=>v.includes(k))) return 'end_after_meeting';
-  if(['memory_request','memory_recall','memory_recall_previous'].some(k=>v.includes(k))) return 'memory_request';
+  if(['memory_request','memory_recall','memory_recall_previous','memory_recall_next','memory_recall_semantic'].some(k=>v.includes(k))) return 'memory_request';
   if(['meeting_soon','acknowledge_meeting','meeting_question','context_next_meeting'].some(k=>v.includes(k))) return 'meeting';
   if(['outing_soon','acknowledge_outing','context_next_outing'].some(k=>v.includes(k))) return 'outing';
-  if(['smalltalk_request','smalltalk_accept','quiet_day','nothing_special_response','mizuki_not_busy','quiet_moment'].some(k=>v.includes(k))) return 'smalltalk';
+  if(['smalltalk_request','smalltalk_accept','smalltalk_topic','smalltalk_no_work','quiet_day','nothing_special_response','mizuki_not_busy','quiet_moment'].some(k=>v.includes(k))) return 'smalltalk';
   if(['silence_request','silence_ack'].some(k=>v.includes(k))) return 'silence';
+  if(['rest_window','rest_window_ack','rest_intent','rest_intent_ack','tired_with_meeting'].some(k=>v.includes(k))) return 'care';
   if(['no_schedule','no_schedule_holiday_morning','no_schedule_holiday','no_schedule_general'].some(k=>v.includes(k))) return 'free_time';
   return v;
 }
 function recentMeaningGroups(n=8){return recentMizuki(n).map(x=>x.semanticGroup||semanticGroup(x.meaningKey||x.semanticMeaning))}
 function hasRecentGroup(group,n=8){return recentMeaningGroups(n).includes(group)}
 function isMemoryRequestText(text=''){
-  return /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,16}(話した|言った)|その前.{0,12}(何て|なんて|言った)|もう一つ前|もうひとつ前|さらに前|さっきの話/.test(text);
+  return /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,20}(話した|言った|って話)|その前.{0,12}(何て|なんて|言った)|もう一つ前|もうひとつ前|さらに前|さっきの話|そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)/.test(text);
 }
 function substantiveUserHistory(){
   // speak() is called after the current user message is appended, so exclude the final user item.
@@ -362,18 +371,87 @@ function substantiveUserHistory(){
 function cleanQuote(text=''){
   return text.trim().replace(/[。！？!?]+$/,'');
 }
-function memoryReply(text=''){
+function saveDialogState(){save(K.dialogState,dialogState)}
+function setMemoryCursor(item){dialogState.memoryCursorId=item?.id||null;saveDialogState()}
+function cursorIndex(items){return dialogState.memoryCursorId?items.findIndex(x=>x.id===dialogState.memoryCursorId):-1}
+function memoryQueryMeanings(info){
+  const ignore=new Set(['memory_request','late_time','early_time','meeting_soon','outing_soon','work_tomorrow']);
+  return (info?.semanticMeanings||[]).filter(m=>!ignore.has(m));
+}
+function findMemoryByMeaning(items,info,text=''){
+  const meanings=memoryQueryMeanings(info);
+  if(meanings.length){
+    for(let i=items.length-1;i>=0;i--){
+      const ms=items[i].semanticMeanings||[items[i].semanticMeaning];
+      if(meanings.some(m=>ms.includes(m))) return items[i];
+    }
+  }
+  // Lightweight keyword fallbacks for explicit remembered topics.
+  const tests=[];
+  if(/仕事.{0,8}多|忙し/.test(text)) tests.push(/仕事.{0,8}(多|忙)|忙し/);
+  if(/残り.{0,8}(一つ|1つ|ひとつ|一件|1件)/.test(text)) tests.push(/残り.{0,8}(一つ|1つ|ひとつ|一件|1件)/);
+  if(/片づ|片付|はかど|捗/.test(text)) tests.push(/片づ|片付|はかど|捗/);
+  if(/疲れ/.test(text)) tests.push(/疲れ/);
+  if(/打合せ|会議/.test(text)) tests.push(/打合せ|会議/);
+  for(const rx of tests){
+    for(let i=items.length-1;i>=0;i--) if(rx.test(items[i].text||'')) return items[i];
+  }
+  return null;
+}
+function memoryReply(text='',info=null){
   const items=substantiveUserHistory();
   if(!items.length) return '確認できる以前の発言はまだありません。';
-  let back=0;
-  if(/その前/.test(text)) back=1;
-  if(/もう一つ前|もうひとつ前|さらに前/.test(text)) back=2;
-  const target=items[items.length-1-back];
-  if(!target) return 'そこまでは確認できません。';
+  let idx=cursorIndex(items);
+  let target=null;
+  let mode='latest';
+
+  const wantsNext=/そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)/.test(text);
+  const wantsPrev=/その前|もう一つ前|もうひとつ前|さらに前/.test(text);
+
+  if(wantsNext){
+    mode='next';
+    if(idx<0) return 'どの発言の続きか、今は特定できません。';
+    target=items[idx+1]||null;
+  }else if(wantsPrev){
+    mode='prev';
+    if(idx>=0){
+      target=items[idx-1]||null;
+    }else{
+      const back=/もう一つ前|もうひとつ前|さらに前/.test(text)?2:1;
+      target=items[items.length-1-back]||null;
+    }
+  }else{
+    const semanticTarget=findMemoryByMeaning(items,info,text);
+    if(semanticTarget){target=semanticTarget;mode='semantic'}
+    else target=items[items.length-1];
+  }
+
+  if(!target) return mode==='next'?'そのあとに確認できる発言はありません。':'そこまでは確認できません。';
+  setMemoryCursor(target);
   const q=cleanQuote(target.text||'');
+  if(mode==='next') return `はい。そのあと「${q}」と言っていましたね。`;
+  if(mode==='prev') return `その前は「${q}」と言っていましたね。`;
+  if(mode==='semantic' && /前に/.test(text)) return `はい。前に「${q}」と話していましたね。`;
   if(/覚えて/.test(text)) return `はい。「${q}」と言っていましたね。`;
-  if(back>0) return `その前は「${q}」と言っていましたね。`;
   return `「${q}」と言っていましたね。`;
+}
+function smalltalkTopicReply(text=''){
+  if(/仕事の話.{0,8}(じゃなく|以外)|仕事以外|普通の雑談/.test(text)){
+    return 'わかりました。じゃあ仕事の話は置いておきましょう。最近、何かハマっているものはありますか？';
+  }
+  if(/話題.{0,8}(出して|ちょうだい|出せ)|美月から.{0,12}(話題|話して|何か)|そっちから.{0,10}(話して|話題)/.test(text)){
+    const topics=[
+      'じゃあ一つ。最近、何かハマっているものってありますか？',
+      'では一つ。最近聴いてよかった曲ってありますか？',
+      'じゃあ、最近ちょっと楽しみにしていることってありますか？'
+    ];
+    const used=new Set(recentMizuki(8).map(x=>x.text));
+    return topics.find(x=>!used.has(x))||topics[Math.floor(Math.random()*topics.length)];
+  }
+  if(/楽しい話/.test(text)) return 'いいですね。仕事も終わったことですし、少し楽しい話をしましょうか。';
+  return (scenario.timeBand==='夜'||scenario.timeBand==='深夜')
+    ? 'いいですね。今は少し静かな時間ですし、少しお話ししましょうか。'
+    : 'いいですね。少しお話ししましょうか。';
 }
 function progressPositiveReply(text='',withOuting=false){
   let first='今日はだいぶ進んだんですね。';
@@ -411,19 +489,33 @@ function candidatesFor(info,text){
   }
   if(info.semanticMeaning==='memory_request'){
     const prev=/その前|もう一つ前|もうひとつ前|さらに前/.test(text);
-    c.push(candidate('memory',prev?'memory_recall_previous':'memory_recall','inform','memory_recall',memoryReply(text),'normal',22,'memory_request'));
+    const next=/そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)/.test(text);
+    c.push(candidate('memory',next?'memory_recall_next':(prev?'memory_recall_previous':'memory_recall'),'inform','memory_recall',memoryReply(text,info),'normal',22,'memory_request'));
     return c;
   }
   if(info.semanticMeaning==='smalltalk_request'){
-    if(s.timeBand==='夜'||s.timeBand==='深夜'){
-      c.push(candidate('smalltalk','smalltalk_accept','smalltalk','smalltalk_accept','いいですね。今は少し静かな時間ですし、少しお話ししましょうか。','smile',18,'smalltalk'));
-    }else{
-      c.push(candidate('smalltalk','smalltalk_accept','smalltalk','smalltalk_accept','いいですね。少しお話ししましょうか。','smile',18,'smalltalk'));
-    }
+    const noWork=/仕事の話.{0,8}(じゃなく|以外)|仕事以外|普通の雑談/.test(text);
+    const topic=/話題.{0,8}(出して|ちょうだい|出せ)|美月から.{0,12}(話題|話して|何か)|そっちから.{0,10}(話して|話題)/.test(text);
+    c.push(candidate('smalltalk',noWork?'smalltalk_no_work':(topic?'smalltalk_topic':'smalltalk_accept'),'smalltalk',topic?'smalltalk_topic':'smalltalk_accept',smalltalkTopicReply(text),'smile',20,'smalltalk'));
     return c;
   }
   if(info.semanticMeaning==='ask_advice'){
-    c.push(candidate('question','direct_advice','advise','observation_plus_advice',adviceByScenario(s,text),'serious',14));
+    c.push(candidate('question','direct_advice','advise','observation_plus_advice',adviceByScenario(s,text),'serious',18));
+    return c;
+  }
+  if(info.semanticMeaning==='rest_intent'){
+    const m=text.match(/([0-9０-９]+)\s*分/);
+    const mins=m?m[1]+'分':'少し';
+    const hasMeeting=s.nextPlan==='打合せ'||recentUserHasMeaning('meeting_soon',6);
+    const reply=hasMeeting?`いいと思います。${mins}くらい休んでから、打合せに向かいましょう。`:`いいと思います。${mins}くらい休みましょう。`;
+    c.push(candidate('condition','rest_intent_ack','care','observation_plus_care',reply,'care',21,'care'));
+    return c;
+  }
+  if(info.semanticMeaning==='rest_window'){
+    const reply=(recentUserHasMeaning('user_tired',6)||s.testType==='care')
+      ? 'それなら、打合せまで少し休めそうですね。'
+      : 'それなら、打合せまで少し余裕がありそうですね。';
+    c.push(candidate('condition','rest_window_ack','care','observation_plus_care',reply,'care',21,'care'));
     return c;
   }
   if(info.semanticMeaning==='nothing_special'){
@@ -466,6 +558,12 @@ function candidatesFor(info,text){
 
   if(info.semanticMeaning==='progress_positive'){
     c.push(candidate('progress',s.nextPlan==='外出'?'progress_positive_outing':'progress_positive_ack','observe',s.nextPlan==='外出'?'combined_observation':'observation_only',progressPositiveReply(text,s.nextPlan==='外出'),'smile',17,'progress_positive'));
+    return c;
+  }
+
+  // Care: combine fatigue and the next meeting instead of dropping either side.
+  if(has('user_tired') && has('meeting_soon')){
+    c.push(candidate('condition','tired_with_meeting','care','observation_plus_care','少し疲れているんですね。このあと打合せもあるなら、その前に少し休めるとよさそうです。','care',22,'care'));
     return c;
   }
 
@@ -569,11 +667,24 @@ function candidatesFor(info,text){
   return c;
 }
 function adviceByScenario(s,text=''){
+  // Follow-up criteria questions must answer the criterion, not fall back to acknowledgement.
+  if(/期限.{0,8}同じ|どっち.{0,12}(先|優先)/.test(text)){
+    return '期限が同じなら、重要度が高い方を優先して、重要度も同じなら短時間で一区切りつけられる方から進めるとよさそうです。';
+  }
+  if(/何を残す|残すか.{0,12}(決め|選)|何を.{0,12}残す/.test(text)){
+    return '今日中でなくても問題ないものや、期限・重要度が低いものから残すとよさそうです。';
+  }
+  if(/何を基準|基準に.{0,12}(決め|選)|どうやって.{0,12}(決め|選)/.test(text)){
+    return '期限が近いものか、短時間で一区切りつけられるものを優先するとよさそうです。';
+  }
   if(/打合せ|会議/.test(text)||s.nextPlan==='打合せ'){
     if(/何を.{0,12}確認|確認しておけば|確認すれば/.test(text)){
       return '打合せの目的と、確認しておきたいことを一つ整理しておくとよさそうです。';
     }
     return '次が打合せなら、確認したいことを一つだけ整理しておくとよさそうです。';
+  }
+  if(s.nextPlan==='外出'&&(s.workload==='多い'||/残って/.test(text))){
+    return 'このあと外出なら、出る前に優先度の高いものだけ確認して、残りは戻ってからにするのがよさそうです。';
   }
   if((s.timeBand==='夜'||s.timeBand==='深夜')&&s.workload==='多い') return '今夜全部を片づけるより、残すものを決めた方がよさそうです。';
   if(s.workStatus==='休日') return '今日はお休みなので、無理に予定を増やさなくてもよさそうです。';
@@ -632,6 +743,10 @@ function speak(userText){
 }
 function addUser(text){
   const p=classify(text);
+  if(p.semanticMeaning!=='memory_request') dialogState.memoryCursorId=null;
+  if(p.semanticMeaning==='smalltalk_request' && /仕事の話.{0,8}(じゃなく|以外)|仕事以外|普通の雑談/.test(text)) dialogState.suppressWork=true;
+  else if(p.semanticMeaning!=='smalltalk_request' && /(仕事|業務|打合せ|会議|外出|予定)/.test(text)) dialogState.suppressWork=false;
+  saveDialogState();
   const item={
     id:uid(),timestamp:new Date().toISOString(),speaker:'user',text,
     scenarioId:scenario.id,scenarioSnapshot:{...scenario},
@@ -720,6 +835,7 @@ function send(){
   updateExpression(reply.expression);renderHistory();
 }
 function nextScenario(){
+  dialogState.memoryCursorId=null;dialogState.suppressWork=false;saveDialogState();
   if(!confirm('次のテストへ進みますか？\\n現在の会話履歴は残したまま、想定状況だけ変更します。'))return;
   scenario=generateScenario();testNo++;save(K.scenario,scenario);save(K.testNo,testNo);chips();
   const divider={id:uid(),timestamp:new Date().toISOString(),speaker:'system',text:'── 想定状況を変更しました ──',scenarioId:scenario.id,scenarioSnapshot:{...scenario},mainTopic:'system',semanticMeaning:'scenario_changed',semanticMeanings:['scenario_changed'],meaningKey:'scenario_changed_'+scenario.id,intent:'inform',expression:'normal',phrasePattern:'system',usedName:false};
@@ -750,7 +866,7 @@ function clearType(type){
     evaluations:'評価データをすべて削除しますか？'
   };
   if(!confirm(msgs[type]))return;
-  if(type==='chat'){history=[];save(K.history,history);renderHistory()}
+  if(type==='chat'){history=[];dialogState.memoryCursorId=null;dialogState.suppressWork=false;saveDialogState();save(K.history,history);renderHistory()}
   if(type==='memory'){longMemory=[];coverage={pairs:{},usedScenarios:[]};save(K.longMemory,longMemory);save(K.coverage,coverage)}
   if(type==='evaluations'){evaluations=[];save(K.evals,evaluations);renderHistory()}
 }
