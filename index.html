@@ -127,7 +127,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.1.9 single HTML</div>
+    <div class="version">Mizuki Conversation Lab v0.2.0 single HTML</div>
   </div>
 </div>
 
@@ -279,6 +279,7 @@ function classify(text){
     /(?:だいぶ|結構|かなり).{0,6}(?:進ん|はかど|捗|片づ|片付|終わ)|(?:はかど|捗)った|順調に.{0,6}進ん/.test(t);
   const restWindow = /(?:打合せ|会議).{0,8}(?:まで|前).{0,10}(?:少し)?時間.{0,6}(?:ある|空いて)|(?:少し)?時間.{0,6}(?:ある|空いて).{0,10}(?:打合せ|会議)/.test(t);
   const restIntent = /(?:10|１０|5|５|15|１５|20|２０)?\s*分.{0,8}休(?:もう|む|みたい)|少し.{0,6}休(?:もう|む|みたい)|休憩(?:しよう|する|したい)|休もうかな/.test(t);
+  const relaxIntent = /(?:今日は.{0,8})?(?:少し\s*)?(?:ゆっくり|のんびり).{0,10}(?:しよう|しよ|過ごそう|過ごしたい|したい|する|していたい)(?:かな)?/.test(t);
 
   // Collect multiple meanings instead of stopping at the first match.
   if(/休日出勤|休み.{0,8}(仕事|出勤)|休日.{0,8}(仕事|出勤)/.test(t)) add('work_status','holiday_work');
@@ -306,6 +307,7 @@ function classify(text){
   if(/美月.{0,8}暇|暇.{0,8}美月/.test(t)) add('smalltalk','mizuki_idle');
   if(hasNoSchedule) add('schedule','no_schedule');
 
+  if(relaxIntent) add('condition','relax_intent');
   if(wantsDecision) add('question','decision_request');
   if(wantsAdvice) add('question','ask_advice');
   if(wantsOpinion) add('question','ask_mizuki_opinion');
@@ -316,7 +318,7 @@ function classify(text){
 
   // User control / direct requests / explicit relations > scenario interpretation.
   let primary=null;
-  const priority=['silence_request','memory_request','smalltalk_request','decision_request','ask_advice','rest_intent','rest_window','end_after_meeting','end_after_one','remaining_one','progress_positive','nothing_special','ask_mizuki_opinion','no_schedule'];
+  const priority=['silence_request','memory_request','smalltalk_request','decision_request','ask_advice','rest_intent','rest_window','relax_intent','end_after_meeting','end_after_one','remaining_one','progress_positive','nothing_special','ask_mizuki_opinion','no_schedule'];
   for(const p of priority){
     const hit=found.find(x=>x.semanticMeaning===p);
     if(hit){primary=hit;break;}
@@ -348,6 +350,14 @@ function recentUser(n=8){return history.filter(x=>x.speaker==='user').slice(-n)}
 function recentQuestions(){return recentMizuki(3).filter(x=>x.intent==='ask').length}
 function hasRecentMeaning(key,n=8){return recentMizuki(n).some(x=>x.meaningKey===key)}
 function recentUserHasMeaning(key,n=8){return recentUser(n).some(x=>(x.semanticMeanings||[x.semanticMeaning]).includes(key))}
+function normalizeRepeatText(text=''){
+  return (text||'').replace(/[\s　]+/g,'').replace(/[。．.!！?？、,]/g,'').toLowerCase();
+}
+function sameUserUtteranceCount(text='',n=10){
+  const key=normalizeRepeatText(text);
+  if(!key)return 0;
+  return recentUser(n).filter(x=>normalizeRepeatText(x.text||'')===key).length;
+}
 function semanticGroup(value){
   const v=value||'';
   if(['work_heavy','work_remaining','one_done_but_heavy','multiple_done_but_heavy','acknowledge_heavy_work','acknowledge_remaining','heavy_and_late','late_heavy_work'].some(k=>v.includes(k))) return 'workload_high';
@@ -361,6 +371,7 @@ function semanticGroup(value){
   if(['smalltalk_request','smalltalk_accept','smalltalk_topic','smalltalk_no_work','quiet_day','nothing_special_response','mizuki_not_busy','quiet_moment'].some(k=>v.includes(k))) return 'smalltalk';
   if(['silence_request','silence_ack'].some(k=>v.includes(k))) return 'silence';
   if(['rest_window','rest_window_ack','rest_intent','rest_intent_ack','tired_with_meeting'].some(k=>v.includes(k))) return 'care';
+  if(['relax_intent','relax_intent_holiday_1','relax_intent_holiday_2','relax_intent_holiday_3','relax_intent_general_1','relax_intent_general_2','relax_intent_general_3'].some(k=>v.includes(k))) return 'relax_intent';
   if(['decision_request','direct_decision'].some(k=>v.includes(k))) return 'decision';
   if(['no_schedule','no_schedule_holiday_morning','no_schedule_holiday','no_schedule_general'].some(k=>v.includes(k))) return 'free_time';
   return v;
@@ -618,6 +629,18 @@ function candidatesFor(info,text){
     c.push(candidate('condition','rest_window_ack','care','observation_plus_care',reply,'care',21,'care'));
     return c;
   }
+  if(info.semanticMeaning==='relax_intent'){
+    if(s.workStatus==='休日'){
+      c.push(candidate('condition','relax_intent_holiday_1','care','relax_ack_1','そうですね。今日は少しのんびり過ごしてもよさそうです。','smile',18,'relax_intent'));
+      c.push(candidate('condition','relax_intent_holiday_2','care','relax_ack_2','予定もないようですし、今日はゆっくりする日にしてもよさそうですね。','smile',17,'relax_intent'));
+      c.push(candidate('condition','relax_intent_holiday_3','care','relax_ack_3','たまには何も詰め込まず、ゆっくり過ごすのもよさそうです。','smile',16,'relax_intent'));
+    }else{
+      c.push(candidate('condition','relax_intent_general_1','care','relax_ack_1','そうですね。少しゆっくりする時間を取ってもよさそうです。','smile',18,'relax_intent'));
+      c.push(candidate('condition','relax_intent_general_2','care','relax_ack_2','少しペースを落として過ごすのもよさそうですね。','smile',17,'relax_intent'));
+      c.push(candidate('condition','relax_intent_general_3','care','relax_ack_3','今日は少し余白をつくって過ごしてもよさそうです。','smile',16,'relax_intent'));
+    }
+    return c;
+  }
   if(info.semanticMeaning==='nothing_special'){
     c.push(candidate('smalltalk','quiet_day','smalltalk','smalltalk_short','今日は少し静かですね。','normal',11,'smalltalk'));
     c.push(candidate('smalltalk','nothing_special_response','none','smalltalk_short','今のところ、大きな変化はなさそうですね。','normal',10,'smalltalk'));
@@ -834,21 +857,25 @@ function opinionByScenario(s){
   if(s.workStatus==='休日出勤') return '休日出勤なので、普段の勤務日と同じ詰め方にしなくてもよさそうです。';
   return '今のところ、無理に変える必要がある状況には見えません。';
 }
-function chooseCandidate(list){
+function chooseCandidate(list,userText=''){
+  const recentTexts=new Set(recentMizuki(20).map(x=>x.text));
+  const repeatCount=sameUserUtteranceCount(userText,10);
   let scored=list.map(x=>{
     let score=x.base-patternPenalty(x.pattern);
     let rejected=false, reason=[];
+    if(recentTexts.has(x.text)){score-=30;rejected=true;reason.push('exactTextRepeat')}
     if(hasRecentMeaning(x.meaningKey,8)){score-=8;rejected=true;reason.push('recentMeaning')}
     if(x.semanticGroup && hasRecentGroup(x.semanticGroup,4)){
       score-=4.5; reason.push('recentSemanticGroup');
     }
     if(recentMizuki(3).some(r=>r.mainTopic===x.topic)){score-=1.8;reason.push('recentTopic')}
     if(x.intent==='ask'&&recentQuestions()>0){score-=7;reason.push('recentQuestion')}
+    if(repeatCount>=2 && x.intent==='ask'){score-=15;reason.push('repeatAvoidGenericQuestion')}
     if(x.intent==='advise'&&scenario.testType!=='advice'){score-=1.5;reason.push('adviceLowPriority')}
     score+=Math.random()*1.5;
     return {...x,score,rejected,reason};
   }).sort((a,b)=>b.score-a.score);
-  return {selected:scored[0],all:scored};
+  return {selected:scored[0],all:scored,repeatCount};
 }
 function maybeName(text,intent){
   const use=canUseName() && ['care','advise','ask'].includes(intent);
@@ -857,7 +884,7 @@ function maybeName(text,intent){
 function speak(userText){
   const parsed=classify(userText);
   const list=candidatesFor(parsed,userText);
-  const choice=chooseCandidate(list);
+  const choice=chooseCandidate(list,userText);
   const named=maybeName(choice.selected.text,choice.selected.intent);
   const debug={
     OBSERVE:{userText,scenario},
@@ -868,6 +895,7 @@ function speak(userText){
     RECENT:recentMizuki(6).map(x=>x.meaningKey),
     RECENT_GROUPS:recentMeaningGroups(6),
     REPETITION_REJECTED:choice.all.filter(x=>x.rejected).map(x=>x.meaningKey),
+    REPEATED_USER_UTTERANCE_COUNT:choice.repeatCount||0,
     EXPRESSION:choice.selected.expression,
     USED_NAME:named.usedName
   };
