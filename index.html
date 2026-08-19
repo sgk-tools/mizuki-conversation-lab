@@ -127,7 +127,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.1.7 single HTML</div>
+    <div class="version">Mizuki Conversation Lab v0.1.8 single HTML</div>
   </div>
 </div>
 
@@ -135,7 +135,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.1.7-single';
+const VERSION='0.1.8-single';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -257,7 +257,7 @@ function classify(text){
   const terseMemoryNav = memoryCursorActive &&
     /^(?:じゃあ[、, ]*)?(?:その前(?:は)?|もう一つ前(?:は)?|もうひとつ前(?:は)?|さらに前(?:は)?|そのあと(?:もう一つ|もうひとつ)?(?:は)?|もう一つあと(?:は)?|もうひとつあと(?:は)?|さらにそのあと(?:は)?|その次(?:は)?|次(?:は)?)[？?。 ]*$/.test(t);
   const wantsMemory =
-    /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,20}(話した|言った|って話)|その前(?:は)?[？?。 ]*$|その前.{0,12}(何て|なんて|言った)|もう一つ前|もうひとつ前|さらに前|さっきの話|そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)|そのあと.{0,8}(もう一つ|もうひとつ)|もう一つあと|もうひとつあと|さらにそのあと/.test(t) || terseMemoryNav;
+    /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,20}(話した|言った|って話)|その前(?:は)?[？?。 ]*$|その前.{0,18}(何て|なんて|言った|言って|答えた)|もう一つ前|もうひとつ前|さらに前|さっきの話|そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)|そのあと.{0,8}(もう一つ|もうひとつ)|もう一つあと|もうひとつあと|さらにそのあと|美月.{0,20}(何て|なんて|何を).{0,12}(答えた|答え|言った|言って|話した|返した)|(?:俺|僕|わたし|私|自分).{0,20}(何て|なんて|何を).{0,12}(言った|言って|話した)/.test(t) || terseMemoryNav;
   const wantsSmalltalk =
     /雑談しよう|雑談しよ|少し.{0,5}(話そう|話しよう|お話ししよう)|ちょっと.{0,5}(話そう|話しよう)|話し相手|雑談したい|楽しい話|何か.{0,8}話題.{0,6}(出して|ちょうだい|出せ)|美月から.{0,12}(話題|話して|何か)|そっちから.{0,10}(話して|話題)|仕事の話.{0,6}(じゃなく|以外)|仕事以外.{0,8}(話|雑談)|普通の雑談/.test(t);
   const wantsAdvice =
@@ -365,13 +365,25 @@ function hasRecentGroup(group,n=8){return recentMeaningGroups(n).includes(group)
 function isMemoryRequestText(text=''){
   const t=(text||'').trim();
   const terse=!!dialogState.memoryCursorId && /^(?:じゃあ[、, ]*)?(?:その前(?:は)?|もう一つ前(?:は)?|もうひとつ前(?:は)?|さらに前(?:は)?|そのあと(?:もう一つ|もうひとつ)?(?:は)?|もう一つあと(?:は)?|もうひとつあと(?:は)?|さらにそのあと(?:は)?|その次(?:は)?|次(?:は)?)[？?。 ]*$/.test(t);
-  return /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,20}(話した|言った|って話)|その前(?:は)?[？?。 ]*$|その前.{0,12}(何て|なんて|言った)|もう一つ前|もうひとつ前|さらに前|さっきの話|そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)|そのあと.{0,8}(もう一つ|もうひとつ)|もう一つあと|もうひとつあと|さらにそのあと/.test(t) || terse;
+  return /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,20}(話した|言った|って話)|その前(?:は)?[？?。 ]*$|その前.{0,18}(何て|なんて|言った|言って|答えた)|もう一つ前|もうひとつ前|さらに前|さっきの話|そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)|そのあと.{0,8}(もう一つ|もうひとつ)|もう一つあと|もうひとつあと|さらにそのあと|美月.{0,20}(何て|なんて|何を).{0,12}(答えた|答え|言った|言って|話した|返した)|(?:俺|僕|わたし|私|自分).{0,20}(何て|なんて|何を).{0,12}(言った|言って|話した)/.test(t) || terse;
+}
+function priorConversationHistory(){
+  // memoryReply() is called after the current user request is appended.
+  return history.slice(0,-1).filter(x=>x.mainTopic!=='system'&&x.speaker!=='system');
 }
 function substantiveUserHistory(){
-  // speak() is called after the current user message is appended, so exclude the final user item.
-  const users=history.filter(x=>x.speaker==='user');
-  const prior=users.slice(0,-1);
-  return prior.filter(x=>!isMemoryRequestText(x.text||''));
+  return priorConversationHistory().filter(x=>x.speaker==='user'&&!isMemoryRequestText(x.text||''));
+}
+function substantiveMizukiHistory(){
+  return priorConversationHistory().filter(x=>
+    x.speaker==='mizuki' &&
+    x.mainTopic!=='memory' &&
+    x.semanticGroup!=='memory_request' &&
+    semanticGroup(x.meaningKey||x.semanticMeaning)!=='memory_request'
+  );
+}
+function memoryItemsForSpeaker(speaker){
+  return speaker==='mizuki'?substantiveMizukiHistory():substantiveUserHistory();
 }
 function cleanQuote(text=''){
   return text.trim().replace(/[。！？!?]+$/,'');
@@ -379,6 +391,10 @@ function cleanQuote(text=''){
 function saveDialogState(){save(K.dialogState,dialogState)}
 function setMemoryCursor(item){dialogState.memoryCursorId=item?.id||null;saveDialogState()}
 function cursorIndex(items){return dialogState.memoryCursorId?items.findIndex(x=>x.id===dialogState.memoryCursorId):-1}
+function cursorItem(){
+  if(!dialogState.memoryCursorId) return null;
+  return priorConversationHistory().find(x=>x.id===dialogState.memoryCursorId)||null;
+}
 function memoryQueryMeanings(info){
   const ignore=new Set(['memory_request','late_time','early_time','meeting_soon','outing_soon','work_tomorrow']);
   return (info?.semanticMeanings||[]).filter(m=>!ignore.has(m));
@@ -403,15 +419,78 @@ function findMemoryByMeaning(items,info,text=''){
   }
   return null;
 }
+function explicitMemorySpeaker(text=''){
+  const t=(text||'').trim();
+  if(/美月|みづき|ミヅキ/.test(t)) return 'mizuki';
+  if(/(?:俺|僕|わたし|私|自分).{0,20}(?:何て|なんて|何を).{0,12}(?:言った|言って|話した)/.test(t)) return 'user';
+  return null;
+}
+function relativeSpeakerTarget(speaker,direction){
+  const all=priorConversationHistory();
+  if(!all.length) return null;
+  const cur=cursorItem();
+  const curIdx=cur?all.findIndex(x=>x.id===cur.id):-1;
+  if(direction==='next'){
+    const from=curIdx>=0?curIdx+1:0;
+    for(let i=from;i<all.length;i++){
+      const x=all[i];
+      if(x.speaker!==speaker) continue;
+      if(speaker==='user' && isMemoryRequestText(x.text||'')) continue;
+      if(speaker==='mizuki' && (x.mainTopic==='memory'||x.semanticGroup==='memory_request'||semanticGroup(x.meaningKey||x.semanticMeaning)==='memory_request')) continue;
+      return x;
+    }
+    return null;
+  }
+  const from=curIdx>=0?curIdx-1:all.length-1;
+  for(let i=from;i>=0;i--){
+    const x=all[i];
+    if(x.speaker!==speaker) continue;
+    if(speaker==='user' && isMemoryRequestText(x.text||'')) continue;
+    if(speaker==='mizuki' && (x.mainTopic==='memory'||x.semanticGroup==='memory_request'||semanticGroup(x.meaningKey||x.semanticMeaning)==='memory_request')) continue;
+    return x;
+  }
+  return null;
+}
 function memoryReply(text='',info=null){
-  const items=substantiveUserHistory();
-  if(!items.length) return '確認できる以前の発言はまだありません。';
+  const t=(text||'').trim();
+  const explicitSpeaker=explicitMemorySpeaker(t);
+  const cur=cursorItem();
+  const wantsNext=/そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)|そのあと.{0,8}(もう一つ|もうひとつ)|もう一つあと|もうひとつあと|さらにそのあと|その次|^(?:じゃあ[、, ]*)?次(?:は)?[？?。 ]*$/.test(t);
+  const wantsPrev=/その前|もう一つ前|もうひとつ前|さらに前/.test(t);
+
+  // Speaker-qualified recall: "美月は何て答えた？", "その前に美月は？" etc.
+  if(explicitSpeaker){
+    let direction=null;
+    if(wantsPrev) direction='prev';
+    else if(wantsNext || /そのとき/.test(t) || /答えた|答え|返した/.test(t)) direction='next';
+
+    let target=null;
+    if(direction && cur) target=relativeSpeakerTarget(explicitSpeaker,direction);
+    if(!target){
+      const items=memoryItemsForSpeaker(explicitSpeaker);
+      target=items[items.length-1]||null;
+    }
+    if(!target) return explicitSpeaker==='mizuki'?'確認できる私の以前の発言はまだありません。':'確認できる以前の発言はまだありません。';
+    setMemoryCursor(target);
+    const q=cleanQuote(target.text||'');
+    if(explicitSpeaker==='mizuki'){
+      if(direction==='prev') return `その前に私は「${q}」と言っていました。`;
+      if(direction==='next' && /答えた|答え|返した/.test(t)) return `そのとき私は「${q}」と答えていました。`;
+      if(direction==='next') return `そのあと私は「${q}」と言っていました。`;
+      return `私は「${q}」と言っていました。`;
+    }
+    if(direction==='prev') return `その前は「${q}」と言っていましたね。`;
+    if(direction==='next') return `そのあと「${q}」と言っていましたね。`;
+    return `「${q}」と言っていましたね。`;
+  }
+
+  // Generic recall keeps navigating within the speaker currently referenced.
+  const currentSpeaker=cur?.speaker==='mizuki'?'mizuki':'user';
+  const items=memoryItemsForSpeaker(currentSpeaker);
+  if(!items.length) return currentSpeaker==='mizuki'?'確認できる私の以前の発言はまだありません。':'確認できる以前の発言はまだありません。';
   let idx=cursorIndex(items);
   let target=null;
   let mode='latest';
-
-  const wantsNext=/そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)|そのあと.{0,8}(もう一つ|もうひとつ)|もう一つあと|もうひとつあと|さらにそのあと|その次|^(?:じゃあ[、, ]*)?次(?:は)?[？?。 ]*$/.test(text);
-  const wantsPrev=/その前|もう一つ前|もうひとつ前|さらに前/.test(text);
 
   if(wantsNext){
     mode='next';
@@ -422,22 +501,29 @@ function memoryReply(text='',info=null){
     if(idx>=0){
       target=items[idx-1]||null;
     }else{
-      const back=/もう一つ前|もうひとつ前|さらに前/.test(text)?2:1;
+      const back=/もう一つ前|もうひとつ前|さらに前/.test(t)?2:1;
       target=items[items.length-1-back]||null;
     }
   }else{
-    const semanticTarget=findMemoryByMeaning(items,info,text);
+    // Topic/meaning search defaults to the user's substantive statements.
+    const userItems=substantiveUserHistory();
+    const semanticTarget=findMemoryByMeaning(userItems,info,t);
     if(semanticTarget){target=semanticTarget;mode='semantic'}
-    else target=items[items.length-1];
+    else target=userItems[userItems.length-1]||null;
   }
 
   if(!target) return mode==='next'?'そのあとに確認できる発言はありません。':'そこまでは確認できません。';
   setMemoryCursor(target);
   const q=cleanQuote(target.text||'');
+  if(currentSpeaker==='mizuki'){
+    if(mode==='next') return `そのあと私は「${q}」と言っていました。`;
+    if(mode==='prev') return `その前に私は「${q}」と言っていました。`;
+    return `私は「${q}」と言っていました。`;
+  }
   if(mode==='next') return `はい。そのあと「${q}」と言っていましたね。`;
   if(mode==='prev') return `その前は「${q}」と言っていましたね。`;
-  if(mode==='semantic' && /前に/.test(text)) return `はい。前に「${q}」と話していましたね。`;
-  if(/覚えて/.test(text)) return `はい。「${q}」と言っていましたね。`;
+  if(mode==='semantic' && /前に/.test(t)) return `はい。前に「${q}」と話していましたね。`;
+  if(/覚えて/.test(t)) return `はい。「${q}」と言っていましたね。`;
   return `「${q}」と言っていましたね。`;
 }
 function smalltalkTopicReply(text=''){
