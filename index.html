@@ -127,7 +127,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.1.8 single HTML</div>
+    <div class="version">Mizuki Conversation Lab v0.1.9 single HTML</div>
   </div>
 </div>
 
@@ -260,6 +260,8 @@ function classify(text){
     /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,20}(話した|言った|って話)|その前(?:は)?[？?。 ]*$|その前.{0,18}(何て|なんて|言った|言って|答えた)|もう一つ前|もうひとつ前|さらに前|さっきの話|そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)|そのあと.{0,8}(もう一つ|もうひとつ)|もう一つあと|もうひとつあと|さらにそのあと|美月.{0,20}(何て|なんて|何を).{0,12}(答えた|答え|言った|言って|話した|返した)|(?:俺|僕|わたし|私|自分).{0,20}(何て|なんて|何を).{0,12}(言った|言って|話した)/.test(t) || terseMemoryNav;
   const wantsSmalltalk =
     /雑談しよう|雑談しよ|少し.{0,5}(話そう|話しよう|お話ししよう)|ちょっと.{0,5}(話そう|話しよう)|話し相手|雑談したい|楽しい話|何か.{0,8}話題.{0,6}(出して|ちょうだい|出せ)|美月から.{0,12}(話題|話して|何か)|そっちから.{0,10}(話して|話題)|仕事の話.{0,6}(じゃなく|以外)|仕事以外.{0,8}(話|雑談)|普通の雑談/.test(t);
+  const wantsDecision =
+    /(?:今日は|今夜|このあと|残り|仕事|これ|それ)?.{0,18}(?:終わりにして|ここまでにして|切り上げて).{0,10}(?:いい|大丈夫|平気)(?:かな|ですか|[？?])?|(?:明日|あとで).{0,12}(?:回して|まわして|やって).{0,10}(?:いい|大丈夫|平気)(?:かな|ですか|[？?])?|(?:全部|全部は).{0,14}(?:やらなくても|終わらせなくても|片づけなくても|片付けなくても).{0,10}(?:いい|大丈夫|平気)(?:かな|ですか|[？?])?|(?:帰っても|やめても|休んでも).{0,10}(?:いい|大丈夫|平気)(?:かな|ですか|[？?])?/.test(t);
   const wantsAdvice =
     /どうしたら|どうすれば|アドバイス|助言|何を.{0,16}(すれば|したら|確認|気をつけ|基準|決めれば|残す)|何か.{0,12}(気をつけ|した方|すべき)|気をつけた方がいい|確認しておけばいい|確認すればいい|どうした方がいい|どうやって.{0,12}(決め|選)|何を基準|基準に.{0,12}(決め|選)|期限.{0,8}同じ|どっち.{0,12}(先|優先)|何を残す|残すか.{0,12}(決め|選)/.test(t);
   const wantsOpinion = /どう思う|美月.{0,8}どう/.test(t);
@@ -304,6 +306,7 @@ function classify(text){
   if(/美月.{0,8}暇|暇.{0,8}美月/.test(t)) add('smalltalk','mizuki_idle');
   if(hasNoSchedule) add('schedule','no_schedule');
 
+  if(wantsDecision) add('question','decision_request');
   if(wantsAdvice) add('question','ask_advice');
   if(wantsOpinion) add('question','ask_mizuki_opinion');
   if(wantsNothingSpecial) add('smalltalk','nothing_special');
@@ -313,7 +316,7 @@ function classify(text){
 
   // User control / direct requests / explicit relations > scenario interpretation.
   let primary=null;
-  const priority=['silence_request','memory_request','smalltalk_request','ask_advice','rest_intent','rest_window','end_after_meeting','end_after_one','remaining_one','progress_positive','nothing_special','ask_mizuki_opinion','no_schedule'];
+  const priority=['silence_request','memory_request','smalltalk_request','decision_request','ask_advice','rest_intent','rest_window','end_after_meeting','end_after_one','remaining_one','progress_positive','nothing_special','ask_mizuki_opinion','no_schedule'];
   for(const p of priority){
     const hit=found.find(x=>x.semanticMeaning===p);
     if(hit){primary=hit;break;}
@@ -331,6 +334,7 @@ function classify(text){
     mainTopic:primary.mainTopic,
     semanticMeaning:primary.semanticMeaning,
     semanticMeanings:found.map(x=>x.semanticMeaning),
+    wantsDecision,
     wantsAdvice,
     wantsNothingSpecial,
     wantsSmalltalk,
@@ -357,6 +361,7 @@ function semanticGroup(value){
   if(['smalltalk_request','smalltalk_accept','smalltalk_topic','smalltalk_no_work','quiet_day','nothing_special_response','mizuki_not_busy','quiet_moment'].some(k=>v.includes(k))) return 'smalltalk';
   if(['silence_request','silence_ack'].some(k=>v.includes(k))) return 'silence';
   if(['rest_window','rest_window_ack','rest_intent','rest_intent_ack','tired_with_meeting'].some(k=>v.includes(k))) return 'care';
+  if(['decision_request','direct_decision'].some(k=>v.includes(k))) return 'decision';
   if(['no_schedule','no_schedule_holiday_morning','no_schedule_holiday','no_schedule_general'].some(k=>v.includes(k))) return 'free_time';
   return v;
 }
@@ -590,6 +595,10 @@ function candidatesFor(info,text){
     c.push(candidate('smalltalk',noWork?'smalltalk_no_work':(topic?'smalltalk_topic':'smalltalk_accept'),'smalltalk',topic?'smalltalk_topic':'smalltalk_accept',smalltalkTopicReply(text),'smile',20,'smalltalk'));
     return c;
   }
+  if(info.semanticMeaning==='decision_request'){
+    c.push(candidate('question','direct_decision','advise','decision_answer',decisionByScenario(s,text),'care',24,'decision'));
+    return c;
+  }
   if(info.semanticMeaning==='ask_advice'){
     c.push(candidate('question','direct_advice','advise','observation_plus_advice',adviceByScenario(s,text),'serious',18));
     return c;
@@ -756,6 +765,45 @@ function candidatesFor(info,text){
   }
 
   return c;
+}
+function decisionByScenario(s,text=''){
+  const t=(text||'').trim();
+  const tired=recentUserHasMeaning('user_tired',6);
+  const remaining=recentUserHasMeaning('work_remaining',6)||s.workload==='多い';
+  const afterWork=s.workStatus==='勤務終了後';
+  const late=s.timeBand==='夜'||s.timeBand==='深夜';
+  const outing=s.nextPlan==='外出'||recentUserHasMeaning('outing_soon',6);
+  const meeting=s.nextPlan==='打合せ'||recentUserHasMeaning('meeting_soon',6);
+
+  const postpone=/(?:明日|あとで).{0,12}(?:回して|まわして|やって)|(?:残り|仕事).{0,12}明日/.test(t);
+  const finish=/(?:終わりにして|ここまでにして|切り上げて|帰っても|やめても)/.test(t);
+  const notAll=/(?:全部|全部は).{0,14}(?:やらなくても|終わらせなくても|片づけなくても|片付けなくても)/.test(t);
+  const rest=/休んでも/.test(t);
+
+  if(rest){
+    if(meeting) return 'はい。少し休んで大丈夫そうです。打合せまで余裕があるなら、短く休んでから向かいましょう。';
+    return 'はい。少し休んで大丈夫そうです。無理に続けず、いったん休みましょう。';
+  }
+  if(postpone){
+    if(afterWork) return '大丈夫そうです。もう勤務時間も終わっていますし、今日はここまでにして、残りは明日に回しましょう。';
+    if(tired||late) return '大丈夫そうです。今日は無理をせず、急ぎでないものは明日に回しましょう。';
+    if(outing) return '大丈夫そうです。このあと外出もあるなら、急ぎでないものは明日に回してよさそうです。';
+    return '期限に問題がなければ、明日に回して大丈夫そうです。';
+  }
+  if(finish){
+    if(afterWork) return 'はい。もう勤務時間も終わっていますし、今日はここまでにしてよさそうです。残りは明日に回しましょう。';
+    if(tired||late) return 'はい。今日はここまでにしてよさそうです。残りは無理せず明日に回しましょう。';
+    if(outing) return 'はい。このあと外出もあるなら、今日は急ぎのものだけにして切り上げてよさそうです。';
+    return 'はい。急ぎのものが残っていなければ、今日はここまでにしてよさそうです。';
+  }
+  if(notAll){
+    if(outing) return 'はい。このあと外出もあるなら、全部やらなくてもよさそうです。急ぎでないものは残して大丈夫そうです。';
+    if(tired) return 'はい。今日は全部やらなくてもよさそうです。疲れているなら、急ぎのものだけにして残りは明日に回しましょう。';
+    if(afterWork||late) return 'はい。今日は全部やらなくてもよさそうです。急ぎのものだけ確認して、残りは明日に回しましょう。';
+    if(remaining) return 'はい。全部を一度に片づけなくてもよさそうです。期限と重要度の高いものから絞りましょう。';
+    return 'はい。急ぎでないものまで今日中に全部やる必要はなさそうです。';
+  }
+  return 'はい。今の状況なら、その進め方でよさそうです。';
 }
 function adviceByScenario(s,text=''){
   // Follow-up criteria questions must answer the criterion, not fall back to acknowledgement.
