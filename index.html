@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>Mizuki Conversation Lab v0.1.4</title>
+<title>Mizuki Conversation Lab v0.2.2</title>
 <style>
 :root{
   --bg:#f5f6f8;--panel:#ffffff;--text:#17181b;--sub:#6f737b;--line:#e6e8ec;
@@ -127,7 +127,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.2.1 single HTML</div>
+    <div class="version">Mizuki Conversation Lab v0.2.2 single HTML</div>
   </div>
 </div>
 
@@ -135,7 +135,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.1.8-single';
+const VERSION='0.2.2-single';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -157,7 +157,30 @@ let evaluations=load(K.evals,[]);
 let longMemory=load(K.longMemory,[]);
 let coverage=load(K.coverage,{pairs:{},usedScenarios:[]});
 let testNo=load(K.testNo,1);
-let dialogState=load(K.dialogState,{memoryCursorId:null,suppressWork:false});
+let dialogState=load(K.dialogState,{memoryCursorId:null,suppressWork:false,smalltalkTurns:0,smalltalkTopic:null});
+if(typeof dialogState.suppressWork!=='boolean') dialogState.suppressWork=false;
+if(!Number.isFinite(dialogState.smalltalkTurns)) dialogState.smalltalkTurns=0;
+if(typeof dialogState.smalltalkTopic!=='string') dialogState.smalltalkTopic=null;
+
+function smalltalkActive(){
+  return !!dialogState.suppressWork && (dialogState.smalltalkTurns||0)>0;
+}
+function detectSmalltalkTopic(text=''){
+  const t=(text||'').trim();
+  if(/アニメ|漫画|マンガ/.test(t)) return 'anime';
+  if(/音楽|曲|歌|カラオケ|バンド|アーティスト/.test(t)) return 'music';
+  if(/ゲーム|Switch|PlayStation|PS5|Steam/.test(t)) return 'game';
+  if(/映画|ドラマ|動画|YouTube|配信/.test(t)) return 'screen';
+  if(/食べ|料理|ごはん|ご飯|ラーメン|カフェ|お菓子/.test(t)) return 'food';
+  if(/週末|休み|休日|旅行|出かけ|お出かけ/.test(t)) return 'weekend';
+  if(/趣味|ハマって|はまって|好き/.test(t)) return 'hobby';
+  return null;
+}
+function explicitWorkReturn(text=''){
+  const t=(text||'').trim();
+  if(/仕事の話.{0,8}(じゃなく|以外)|仕事以外.{0,8}(話|雑談)|普通の雑談/.test(t)) return false;
+  return /仕事の話.{0,8}(戻|しよう|する)|業務の話.{0,8}(戻|しよう|する)|(?:次|このあと|この後).{0,8}(?:予定|仕事|業務|打合せ|会議|外出)|(?:仕事|業務|打合せ|会議|外出|勤務|残業).{0,12}(?:どう|何|どこ|いつ|ある|残|終|進|確認|予定)|(?:予定|スケジュール).{0,8}(?:教えて|確認|どう|何|ある)/.test(t);
+}
 
 const levels={
   workStatus:['通常勤務','休日','休日出勤','勤務終了後'],
@@ -260,6 +283,9 @@ function classify(text){
     /覚えて(る|ます|いる)?[？?]?|さっき.{0,20}(何て|なんて|何を).{0,12}(言った|話した)|さっき.{0,20}(言った|話した).{0,10}(こと|内容)|前に.{0,20}(話した|言った|って話)|その前(?:は)?[？?。 ]*$|その前.{0,18}(何て|なんて|言った|言って|答えた)|もう一つ前|もうひとつ前|さらに前|さっきの話|そのとき.{0,16}そのあと|そのあと.{0,16}(何て|なんて|言った|話した|覚えて)|そのあと.{0,8}(もう一つ|もうひとつ)|もう一つあと|もうひとつあと|さらにそのあと|美月.{0,20}(何て|なんて|何を).{0,12}(答えた|答え|言った|言って|話した|返した)|(?:俺|僕|わたし|私|自分).{0,20}(何て|なんて|何を).{0,12}(言った|言って|話した)/.test(t) || terseMemoryNav;
   const wantsSmalltalk =
     /雑談しよう|雑談しよ|少し.{0,5}(話そう|話しよう|お話ししよう)|ちょっと.{0,5}(話そう|話しよう)|話し相手|雑談したい|楽しい話|何か.{0,8}話題.{0,6}(出して|ちょうだい|出せ)|美月から.{0,12}(話題|話して|何か)|そっちから.{0,10}(話して|話題)|仕事の話.{0,6}(じゃなく|以外)|仕事以外.{0,8}(話|雑談)|普通の雑談/.test(t);
+  const continuesSmalltalk =
+    smalltalkActive() && !wantsSmalltalk && !wantsStopTalk && !wantsMemory &&
+    !explicitWorkReturn(t);
   const wantsDecision =
     /(?:今日は|今夜|このあと|残り|仕事|これ|それ)?.{0,18}(?:終わりにして|ここまでにして|切り上げて).{0,10}(?:いい|大丈夫|平気)(?:かな|ですか|[？?])?|(?:明日|あとで).{0,12}(?:回して|まわして|やって).{0,10}(?:いい|大丈夫|平気)(?:かな|ですか|[？?])?|(?:全部|全部は).{0,14}(?:やらなくても|終わらせなくても|片づけなくても|片付けなくても).{0,10}(?:いい|大丈夫|平気)(?:かな|ですか|[？?])?|(?:帰っても|やめても|休んでも).{0,10}(?:いい|大丈夫|平気)(?:かな|ですか|[？?])?|(?:今日は|今夜|このあと)?.{0,10}どこまで.{0,12}(?:やれば|進めれば|終わらせれば|片づければ|片付ければ).{0,8}(?:いい|よさそう|と思う)?[？?]?|(?:何を|どれを|どっちを).{0,10}(?:優先|先に|先から).{0,10}(?:すれば|したら|やれば|進めれば).{0,8}(?:いい|よさそう)?[？?]?|何から.{0,10}(?:やれば|始めれば|進めれば).{0,8}(?:いい|よさそう)?[？?]?|(?:今日は|今夜|このあと|仕事|残り).{0,12}どう(?:したら|すれば).{0,8}(?:いい|よさそう)(?:かな|ですか|[？?])?/.test(t);
   const wantsAdvice =
@@ -313,12 +339,13 @@ function classify(text){
   if(wantsOpinion) add('question','ask_mizuki_opinion');
   if(wantsNothingSpecial) add('smalltalk','nothing_special');
   if(wantsSmalltalk) add('smalltalk','smalltalk_request');
+  if(continuesSmalltalk) add('smalltalk','smalltalk_continue');
   if(wantsMemory) add('memory','memory_request');
   if(wantsStopTalk) add('conversation_control','silence_request');
 
   // User control / direct requests / explicit relations > scenario interpretation.
   let primary=null;
-  const priority=['silence_request','memory_request','smalltalk_request','decision_request','ask_advice','rest_intent','rest_window','relax_intent','end_after_meeting','end_after_one','remaining_one','progress_positive','nothing_special','ask_mizuki_opinion','no_schedule'];
+  const priority=['silence_request','memory_request','smalltalk_request','decision_request','ask_advice','rest_intent','rest_window','relax_intent','smalltalk_continue','end_after_meeting','end_after_one','remaining_one','progress_positive','nothing_special','ask_mizuki_opinion','no_schedule'];
   for(const p of priority){
     const hit=found.find(x=>x.semanticMeaning===p);
     if(hit){primary=hit;break;}
@@ -340,6 +367,7 @@ function classify(text){
     wantsAdvice,
     wantsNothingSpecial,
     wantsSmalltalk,
+    continuesSmalltalk,
     wantsStopTalk,
     wantsMemory,
     hasNoSchedule
@@ -368,7 +396,7 @@ function semanticGroup(value){
   if(['memory_request','memory_recall','memory_recall_previous','memory_recall_next','memory_recall_semantic'].some(k=>v.includes(k))) return 'memory_request';
   if(['meeting_soon','acknowledge_meeting','meeting_question','context_next_meeting'].some(k=>v.includes(k))) return 'meeting';
   if(['outing_soon','acknowledge_outing','context_next_outing'].some(k=>v.includes(k))) return 'outing';
-  if(['smalltalk_request','smalltalk_accept','smalltalk_topic','smalltalk_no_work','quiet_day','nothing_special_response','mizuki_not_busy','quiet_moment'].some(k=>v.includes(k))) return 'smalltalk';
+  if(['smalltalk_request','smalltalk_continue','smalltalk_accept','smalltalk_topic','smalltalk_no_work','quiet_day','nothing_special_response','mizuki_not_busy','quiet_moment'].some(k=>v.includes(k))) return 'smalltalk';
   if(['silence_request','silence_ack'].some(k=>v.includes(k))) return 'silence';
   if(['rest_window','rest_window_ack','rest_intent','rest_intent_ack','tired_with_meeting'].some(k=>v.includes(k))) return 'care';
   if(['relax_intent','relax_intent_holiday_1','relax_intent_holiday_2','relax_intent_holiday_3','relax_intent_general_1','relax_intent_general_2','relax_intent_general_3'].some(k=>v.includes(k))) return 'relax_intent';
@@ -560,6 +588,56 @@ function smalltalkTopicReply(text=''){
     ? 'いいですね。今は少し静かな時間ですし、少しお話ししましょうか。'
     : 'いいですね。少しお話ししましょうか。';
 }
+function smalltalkContinuationReply(text=''){
+  const t=(text||'').trim();
+  const topic=detectSmalltalkTopic(t)||dialogState.smalltalkTopic||'general';
+  const variants={
+    anime:[
+      'アニメをよく見るんですね。最近見て面白かった作品はありますか？',
+      'アニメいいですね。今いちばん続きが気になっている作品はありますか？',
+      '最近はアニメなんですね。どんな系統の作品をよく見ますか？'
+    ],
+    music:[
+      '音楽の話いいですね。最近よく聴いている曲はありますか？',
+      '最近はどんな音楽を聴くことが多いですか？',
+      '音楽なら話が広がりそうですね。今いちばん気に入っている曲は何ですか？'
+    ],
+    game:[
+      'ゲームもいいですね。最近よく遊んでいるタイトルはありますか？',
+      '最近はどんなゲームをやっていますか？',
+      'ゲームの話にしましょう。今いちばんハマっているものは何ですか？'
+    ],
+    screen:[
+      'それを見ることが多いんですね。最近いちばん面白かったものは何ですか？',
+      '最近見た中で、特に印象に残ったものはありますか？',
+      'その話いいですね。どんなところが気に入っていますか？'
+    ],
+    food:[
+      '食べ物の話もいいですね。最近おいしかったものはありますか？',
+      '最近、また食べたいと思ったものってありますか？',
+      'その話なら聞きたいです。最近のお気に入りは何ですか？'
+    ],
+    weekend:[
+      '休みの話にしましょう。最近、のんびりできた日はありましたか？',
+      '週末に楽しみにしていることはありますか？',
+      '仕事抜きなら、休みの日は何をしている時がいちばん楽ですか？'
+    ],
+    hobby:[
+      'それ、最近ハマっているんですね。どんなところが面白いですか？',
+      '好きなことの話はいいですね。最近いちばん時間を使っているものは何ですか？',
+      'もう少しその話を聞きたいです。始めたきっかけは何だったんですか？'
+    ],
+    general:[
+      'その話、もう少し聞きたいです。最近いちばん楽しかったことは何ですか？',
+      '仕事以外の話を続けましょう。最近ちょっと気になっていることはありますか？',
+      'いいですね。今ならどんな話をするのが一番気楽ですか？'
+    ]
+  };
+  const pool=variants[topic]||variants.general;
+  const used=new Set(recentMizuki(10).map(x=>x.text));
+  return pool.find(x=>!used.has(x))||pool[Math.floor(Math.random()*pool.length)];
+}
+
 function progressPositiveReply(text='',withOuting=false){
   let first='今日はだいぶ進んだんですね。';
   if(/はかど|捗/.test(text)) first='今日は結構はかどったんですね。';
@@ -604,6 +682,10 @@ function candidatesFor(info,text){
     const noWork=/仕事の話.{0,8}(じゃなく|以外)|仕事以外|普通の雑談/.test(text);
     const topic=/話題.{0,8}(出して|ちょうだい|出せ)|美月から.{0,12}(話題|話して|何か)|そっちから.{0,10}(話して|話題)/.test(text);
     c.push(candidate('smalltalk',noWork?'smalltalk_no_work':(topic?'smalltalk_topic':'smalltalk_accept'),'smalltalk',topic?'smalltalk_topic':'smalltalk_accept',smalltalkTopicReply(text),'smile',20,'smalltalk'));
+    return c;
+  }
+  if(info.semanticMeaning==='smalltalk_continue'){
+    c.push(candidate('smalltalk','smalltalk_continue','smalltalk','smalltalk_continue',smalltalkContinuationReply(text),'smile',24,'smalltalk'));
     return c;
   }
   if(info.semanticMeaning==='decision_request'){
@@ -899,6 +981,14 @@ function speak(userText){
   const list=candidatesFor(parsed,userText);
   const choice=chooseCandidate(list,userText);
   const named=maybeName(choice.selected.text,choice.selected.intent);
+  if(parsed.semanticMeaning==='smalltalk_continue' && smalltalkActive()){
+    dialogState.smalltalkTurns=Math.max(0,(dialogState.smalltalkTurns||0)-1);
+    if(dialogState.smalltalkTurns===0){
+      dialogState.suppressWork=false;
+      dialogState.smalltalkTopic=null;
+    }
+    saveDialogState();
+  }
   const debug={
     OBSERVE:{userText,scenario},
     INTERPRET:parsed,
@@ -909,6 +999,7 @@ function speak(userText){
     RECENT_GROUPS:recentMeaningGroups(6),
     REPETITION_REJECTED:choice.all.filter(x=>x.rejected).map(x=>x.meaningKey),
     REPEATED_USER_UTTERANCE_COUNT:choice.repeatCount||0,
+    SMALLTALK_STATE:{active:smalltalkActive(),turns:dialogState.smalltalkTurns||0,topic:dialogState.smalltalkTopic||null},
     EXPRESSION:choice.selected.expression,
     USED_NAME:named.usedName
   };
@@ -924,8 +1015,19 @@ function speak(userText){
 function addUser(text){
   const p=classify(text);
   if(p.semanticMeaning!=='memory_request') dialogState.memoryCursorId=null;
-  if(p.semanticMeaning==='smalltalk_request' && /仕事の話.{0,8}(じゃなく|以外)|仕事以外|普通の雑談/.test(text)) dialogState.suppressWork=true;
-  else if(p.semanticMeaning!=='smalltalk_request' && /(仕事|業務|打合せ|会議|外出|予定)/.test(text)) dialogState.suppressWork=false;
+  const startsNoWorkSmalltalk=p.semanticMeaning==='smalltalk_request' && /仕事の話.{0,8}(じゃなく|以外)|仕事以外|普通の雑談/.test(text);
+  if(startsNoWorkSmalltalk){
+    dialogState.suppressWork=true;
+    dialogState.smalltalkTurns=4;
+    dialogState.smalltalkTopic=detectSmalltalkTopic(text)||null;
+  }else if(smalltalkActive() && explicitWorkReturn(text)){
+    dialogState.suppressWork=false;
+    dialogState.smalltalkTurns=0;
+    dialogState.smalltalkTopic=null;
+  }else if(smalltalkActive()){
+    const topic=detectSmalltalkTopic(text);
+    if(topic) dialogState.smalltalkTopic=topic;
+  }
   saveDialogState();
   const item={
     id:uid(),timestamp:new Date().toISOString(),speaker:'user',text,
@@ -1015,7 +1117,7 @@ function send(){
   updateExpression(reply.expression);renderHistory();
 }
 function nextScenario(){
-  dialogState.memoryCursorId=null;dialogState.suppressWork=false;saveDialogState();
+  dialogState.memoryCursorId=null;dialogState.suppressWork=false;dialogState.smalltalkTurns=0;dialogState.smalltalkTopic=null;saveDialogState();
   if(!confirm('次のテストへ進みますか？\\n現在の会話履歴は残したまま、想定状況だけ変更します。'))return;
   scenario=generateScenario();testNo++;save(K.scenario,scenario);save(K.testNo,testNo);chips();
   const divider={id:uid(),timestamp:new Date().toISOString(),speaker:'system',text:'── 想定状況を変更しました ──',scenarioId:scenario.id,scenarioSnapshot:{...scenario},mainTopic:'system',semanticMeaning:'scenario_changed',semanticMeanings:['scenario_changed'],meaningKey:'scenario_changed_'+scenario.id,intent:'inform',expression:'normal',phrasePattern:'system',usedName:false};
@@ -1046,7 +1148,7 @@ function clearType(type){
     evaluations:'評価データをすべて削除しますか？'
   };
   if(!confirm(msgs[type]))return;
-  if(type==='chat'){history=[];dialogState.memoryCursorId=null;dialogState.suppressWork=false;saveDialogState();save(K.history,history);renderHistory()}
+  if(type==='chat'){history=[];dialogState.memoryCursorId=null;dialogState.suppressWork=false;dialogState.smalltalkTurns=0;dialogState.smalltalkTopic=null;saveDialogState();save(K.history,history);renderHistory()}
   if(type==='memory'){longMemory=[];coverage={pairs:{},usedScenarios:[]};save(K.longMemory,longMemory);save(K.coverage,coverage)}
   if(type==='evaluations'){evaluations=[];save(K.evals,evaluations);renderHistory()}
 }
