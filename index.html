@@ -217,7 +217,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.2.4.2 Stage7 · PriorityFix / ExhaustionGate / HumanNatural</div>
+    <div class="version">Mizuki Conversation Lab v0.2.4.2 Stage8 · CandidatePathFix / ExhaustionFix / FinalTextGuard</div>
   </div>
 </div>
 
@@ -225,7 +225,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.2.4.2-stage7-priority-fix-exhaustion-gate-human-natural';
+const VERSION='0.2.4.2-stage8-candidate-path-fix-exhaustion-fix-finaltext-guard';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -407,11 +407,14 @@ function mvMizukiDateKey(dt){
 // 実際の「この状況で5コメント」呼び出しだけを連続文脈として参照する。
 // 25/100件一括評価は別シナリオ同士を誤って「前回」と扱わない。
 function mvMizukiPreviousSingleRecord(ctx){
-  const now=Date.parse(ctx.dateTime||''),day=mvMizukiDateKey(ctx.dateTime);
+  const now=Date.parse(ctx.dateTime||''),day=mvMizukiDateKey(ctx.dateTime),preset=String(ctx.presetKey||'');
   if(!day)return null;
   for(let i=minimoValidation.records.length-1;i>=0;i--){
     const r=minimoValidation.records[i];
     if(!r||r.persona!=='mizuki'||!String(r.batchId||'').startsWith('single-')||!r.scenario)continue;
+    // Stage8: 検証presetを切り替えただけの操作を「実際の状態変化」と誤認しない。
+    // 同じpreset内で手入力した状態変化は従来どおり比較対象にする。
+    if(preset&&String(r.scenario.presetKey||'')!==preset)continue;
     const prevDay=mvMizukiDateKey(r.scenario.dateTime);if(prevDay!==day)continue;
     const prev=Date.parse(r.scenario.dateTime||'');
     if(Number.isFinite(now)&&Number.isFinite(prev)){
@@ -610,26 +613,46 @@ function mvMizukiExhaustionCandidates(intent){
   ]);
   return out;
 }
-function mvRenderMizukiExhaustion(intent,seed,used,usedMeanings,lastMeaning){
+function mvRenderMizukiExhaustion(intent,seed,used,usedMeanings,lastMeaning,historicalUsed){
   const entries=mvMizukiExhaustionCandidates(intent);
-  // 同じ枯渇semanticMeaningを連続させない。まず未使用意味、その次に直前以外を使う。
-  const passes=[
+  // Stage8: 過去評価履歴は「できれば避ける」だけ。同一生成セット内のfinalTextだけをhard guardにする。
+  // これにより過去版の評価データを保持したままでも、scenario FACTや枯渇候補が履歴だけで消えない。
+  const textPasses=[
+    text=>!historicalUsed||!historicalUsed.has(text),
+    text=>true
+  ];
+  const meaningPasses=[
     e=>!usedMeanings.has(e.semanticMeaning)&&e.semanticMeaning!==lastMeaning,
     e=>e.semanticMeaning!==lastMeaning,
     e=>true
   ];
-  for(const pass of passes){
-    for(let ei=0;ei<entries.length;ei++){
-      const entry=entries[ei];if(!pass(entry))continue;
-      const variants=entry.variants,start=((seed+ei*3)%variants.length+variants.length)%variants.length;
-      for(let i=0;i<variants.length;i++){
-        const text=variants[(start+i)%variants.length].trim();
-        if(text&&!used.has(text))return {text,topic:'conversation_exhaustion',speechKind:'exhaustion',semanticMeaning:entry.semanticMeaning,semanticAngle:entry.semanticAngle,exhausted:true};
+  for(const textPass of textPasses){
+    for(const meaningPass of meaningPasses){
+      for(let ei=0;ei<entries.length;ei++){
+        const entry=entries[ei];if(!meaningPass(entry))continue;
+        const variants=entry.variants,start=((seed+ei*3)%variants.length+variants.length)%variants.length;
+        for(let i=0;i<variants.length;i++){
+          const text=variants[(start+i)%variants.length].trim();
+          if(text&&!used.has(text)&&textPass(text))return {text,topic:'conversation_exhaustion',speechKind:'exhaustion',semanticMeaning:entry.semanticMeaning,semanticAngle:entry.semanticAngle,exhausted:true};
+        }
       }
     }
   }
-  // 全文を使い切った場合もAdviceへ戻らず、時刻を含む状態継続表現にする。
-  const text=`${mvClockLabel(intent.ctx.dateTime)}ごろの状況は、さっきから変わっていませんね。`;
+
+  // 通常・Small Talk・CAREと同じく、最終表示文は必ず同一batchのused guardを通す。
+  // 5件評価では上の候補群で十分だが、長時間連続検証でも同文を直接返さない安全弁を持つ。
+  const t=mvClockLabel(intent.ctx.dateTime);
+  const fallback=[
+    {text:`${t}ごろですが、状況はまだ変わっていませんね。`,meaning:'STATE_UNCHANGED',angle:'TIME_CONTEXT_UNCHANGED'},
+    {text:`今の${t}ごろも、さっきと同じ状況ですね。`,meaning:'STATE_UNCHANGED',angle:'TIME_CONTEXT_UNCHANGED'},
+    {text:`この${t}ごろの時点では、まだ新しい変化はなさそうです。`,meaning:'NO_NEW_INFORMATION',angle:'TIME_CONTEXT_UNCHANGED'},
+    {text:'……今は、さっきと同じところですね。',meaning:'REPEATED_CALL_ACKNOWLEDGEMENT',angle:'REPEATED_CALL_ACKNOWLEDGEMENT'}
+  ];
+  for(const pass of textPasses){
+    for(const x of fallback){if(!used.has(x.text)&&pass(x.text))return {text:x.text,topic:'conversation_exhaustion_time',speechKind:'exhaustion',semanticMeaning:x.meaning,semanticAngle:x.angle,exhausted:true};}
+  }
+  // 通常の5件生成では到達しない。到達時も重複表示せず、空文字を返さないため時刻＋seedで一意な内部最終安全弁とする。
+  const text=`${t}ごろの状況は、まだ変わっていませんね。（${Math.abs(seed)%1000}）`;
   return {text,topic:'conversation_exhaustion_time',speechKind:'exhaustion',semanticMeaning:'STATE_UNCHANGED',semanticAngle:'TIME_CONTEXT_UNCHANGED',exhausted:true};
 }
 function mvMizukiValidationCandidates(intent){
@@ -934,25 +957,33 @@ function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGro
   if(cand.speechKind==='continuity')return score>=50;
   return score>=45;
 }
-function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups){
+function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,historicalUsed){
   const candidates=mvMizukiValidationCandidates(intent);
   const ordered=candidates.map((cand,index)=>({cand,index,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups)}))
     .sort((a,b)=>b.score-a.score||a.index-b.index);
 
-  // 全通常候補を最後まで評価する。ここで一件でも価値ある候補があれば枯渇へ行かない。
+  // Stage8: 候補の価値順位を最優先する。
+  // 各candidate内で「過去に未使用の文 → 過去に使用済みだが同一batchでは未使用の文」の順に探す。
+  // 低価値なSmall Talk/枯渇へ逃げるために、高価値FACTを過去履歴だけで捨てない。
   for(const entry of ordered){
     const cand=entry.cand;
     if(!mvMizukiCandidateHasNewHighValue(intent,cand,entry.score,usedMeanings,usedGroups,dailyGroups))continue;
     const start=((seed%cand.variants.length)+cand.variants.length)%cand.variants.length;
-    for(let j=0;j<cand.variants.length;j++){
-      const text=cand.variants[(start+j)%cand.variants.length].replace(/\s+/g,' ').replace(/。 /g,'。').trim();
-      if(/(今日は暑|今日は寒|雨ですね|雪ですね|台風|疲れています|集中でき|やる気が出)/.test(text))continue;
-      if(text&&!used.has(text))return {text,topic:cand.key,speechKind:cand.speechKind,semanticMeaning:cand.semanticMeaning,semanticAngle:cand.semanticAngle,exhausted:false};
+    const textPasses=[
+      text=>!historicalUsed||!historicalUsed.has(text),
+      text=>true
+    ];
+    for(const textPass of textPasses){
+      for(let j=0;j<cand.variants.length;j++){
+        const text=cand.variants[(start+j)%cand.variants.length].replace(/\s+/g,' ').replace(/。 /g,'。').trim();
+        if(/(今日は暑|今日は寒|雨ですね|雪ですね|台風|疲れています|集中でき|やる気が出)/.test(text))continue;
+        if(text&&!used.has(text)&&textPass(text))return {text,topic:cand.key,speechKind:cand.speechKind,semanticMeaning:cand.semanticMeaning,semanticAngle:cand.semanticAngle,exhausted:false};
+      }
     }
   }
 
-  // 高関連FACT / CARE / APPRECIATION / Small Talk / continuity が本当に尽きた後だけ枯渇。
-  return mvRenderMizukiExhaustion(intent,seed,used,usedMeanings,lastMeaning);
+  // 全通常candidateを評価した後、本当に採用可能文がゼロの場合だけ枯渇へ進む。
+  return mvRenderMizukiExhaustion(intent,seed,used,usedMeanings,lastMeaning,historicalUsed);
 }
 
 function mvRenderComment(intent,persona,seed,used){
@@ -978,18 +1009,30 @@ function mvRenderComment(intent,persona,seed,used){
   {const a=[`${c.currentTask||c.nextPlan||'今の一件'}にいったん絞りましょう。全部を一度に考えなくても大丈夫です。`,`まず一つだけ決めて進めましょう。残りはそのあとで大丈夫です。`,`今やる一件だけに目を向ければ十分そうです。`,`全部を同時に抱えず、目の前から一つずつでよさそうです。`,`まず直近の一件を進めて、残りはあとで整理しましょう。`];return a[f];}
 }
 function mvGenerateRecords(ctx,persona,count,batchId){
-  const intent=mvBuildIntent(ctx);const used=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText));const out=[];const usedTopics=new Set(),usedMeanings=new Set(),usedAngles=new Set(),usedGroups=new Set();let lastTopic=null,lastMeaning=null;
+  const intent=mvBuildIntent(ctx);
+  // Stage8 root-cause fix:
+  // 過去評価データのfinalText/semanticMeaningを current batch のhard-consumed setへ混ぜない。
+  // 旧実装では、過去の同一scenario評価が残っているだけで主要FACTが「使用済み」になり、
+  // Small Talk → exhaustion へ早期移行していた。
+  const historicalUsed=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText).filter(Boolean));
+  const used=persona==='mizuki'?new Set():new Set(historicalUsed); // 美月だけbatch内hard guard。凛・麗華の既存重複防止は変更しない。
+  const out=[];const usedTopics=new Set(),usedMeanings=new Set(),usedAngles=new Set(),usedGroups=new Set();let lastTopic=null,lastMeaning=null;
   let exhaustionStateKey=null;const dailyGroups=new Set();
   if(persona==='mizuki'){
-    const recent=mvMizukiRecentSameStateUsage(ctx);exhaustionStateKey=recent.stateKey;
-    recent.meanings.forEach(x=>usedMeanings.add(x));recent.angles.forEach(x=>usedAngles.add(x));recent.groups.forEach(x=>usedGroups.add(x));
+    // stateKey / continuity / daily frequencyは既存履歴を参照してよいが、
+    // scenario FACTのcandidate consumptionには持ち込まない。
+    exhaustionStateKey=mvMizukiStateKey(ctx);
     mvMizukiDailyUsage(ctx).forEach(x=>dailyGroups.add(x));
   }
   for(let i=0;i<count;i++){
     const seed=(Number(ctx.presetKey)||1)*101+i*17+minimoValidation.records.length;
     let finalText,semanticFocus=null,speechKind=null,semanticMeaning=null,semanticAngle=null,exhaustionGroup=null,exhausted=false;
     if(persona==='mizuki'){
-      const rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups);
+      let rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,historicalUsed);
+      // 最終表示文の絶対guard。同一batchで一致した場合は別seedで再選択する。
+      for(let retry=0;retry<8&&rendered&&used.has(rendered.text);retry++){
+        rendered=mvRenderMizukiValidation(intent,seed+(retry+1)*997,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,historicalUsed);
+      }
       finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;exhausted=!!rendered.exhausted;
       exhaustionGroup=exhausted?`CONVERSATION_EXHAUSTION:${semanticMeaning}`:mvMizukiSemanticGroup(intent,semanticMeaning,semanticAngle);
       usedTopics.add(rendered.topic);lastTopic=rendered.topic;lastMeaning=semanticMeaning;
@@ -999,8 +1042,9 @@ function mvGenerateRecords(ctx,persona,count,batchId){
         const dg=mvMizukiDailyFrequencyGroup(semanticMeaning,speechKind);if(dg)dailyGroups.add(dg);
       }
     }else finalText=mvRenderComment(intent,persona,seed,used);
+    // 凛・麗華の既存経路は変更せず、共通のbatch内最終表示重複guardだけ維持。
     used.add(finalText);
-    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'stage7':null}});
+    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'stage8':null}});
   }
   return out;
 }
