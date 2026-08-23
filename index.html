@@ -217,7 +217,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.2.4.2+MizukiUtteranceValueFix · 美月発話価値優先修正</div>
+    <div class="version">Mizuki Conversation Lab v0.2.4.2 Stage6 · HumanContext / SmallTalk / Continuity</div>
   </div>
 </div>
 
@@ -225,7 +225,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.2.4.2-minimo-validation-mizuki-natural-renderfix';
+const VERSION='0.2.4.2-stage6-human-context-smalltalk-continuity';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -399,6 +399,210 @@ function mvDurationLabel(minutes){
   if(h)return `${h}時間`;
   return `${r}分`;
 }
+// ---- 2026-08-23 Stage6: 人間らしさ（変化・継続・Small Talk・頻度制御） ----
+function mvMizukiDateKey(dt){
+  const d=new Date(dt);if(Number.isNaN(d.getTime()))return '';
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+// 実際の「この状況で5コメント」呼び出しだけを連続文脈として参照する。
+// 25/100件一括評価は別シナリオ同士を誤って「前回」と扱わない。
+function mvMizukiPreviousSingleRecord(ctx){
+  const now=Date.parse(ctx.dateTime||''),day=mvMizukiDateKey(ctx.dateTime);
+  if(!day)return null;
+  for(let i=minimoValidation.records.length-1;i>=0;i--){
+    const r=minimoValidation.records[i];
+    if(!r||r.persona!=='mizuki'||!String(r.batchId||'').startsWith('single-')||!r.scenario)continue;
+    const prevDay=mvMizukiDateKey(r.scenario.dateTime);if(prevDay!==day)continue;
+    const prev=Date.parse(r.scenario.dateTime||'');
+    if(Number.isFinite(now)&&Number.isFinite(prev)){
+      if(prev>now)continue;
+      if(now-prev>6*60*60*1000)break;
+    }
+    return r;
+  }
+  return null;
+}
+function mvMizukiChangeCandidates(ctx){
+  const prevRec=mvMizukiPreviousSingleRecord(ctx);if(!prevRec)return [];
+  const p=prevRec.scenario||{},out=[];
+  const prevCompleted=new Set(p.completedTasks||[]),nowCompleted=ctx.completedTasks||[];
+  const newlyCompleted=nowCompleted.filter(x=>!prevCompleted.has(x));
+  const prevTask=String(p.currentTask||''),nowTask=String(ctx.currentTask||'');
+  if(prevTask&&nowCompleted.includes(prevTask)&&!prevCompleted.has(prevTask)){
+    out.push({key:'change_previous_task_completed',variants:[`さっきの${prevTask}、終わったんですね。`,`さっき進めていた${prevTask}、終わったんですね。`],speechKind:'acknowledgement',semanticMeaning:'PREVIOUS_TASK_COMPLETED',semanticAngle:'PREVIOUS_TO_COMPLETED',utteranceValue:46});
+  }else if(newlyCompleted.length){
+    const x=newlyCompleted[newlyCompleted.length-1];
+    out.push({key:'change_new_completion',variants:[`${x}が終わって、さっきより一つ進みましたね。`],speechKind:'acknowledgement',semanticMeaning:'NEW_COMPLETION_SINCE_LAST_CALL',semanticAngle:'STATE_CHANGE_COMPLETION',utteranceValue:43});
+  }
+  if(prevTask&&nowTask&&prevTask!==nowTask){
+    out.push({key:'change_current_task',variants:[`さっきは${prevTask}で、今は${nowTask}なんですね。`,`${prevTask}から${nowTask}に切り替わったんですね。`],speechKind:'acknowledgement',semanticMeaning:'CURRENT_TASK_CHANGED',semanticAngle:'PREVIOUS_TO_CURRENT',utteranceValue:44});
+  }
+  const pu=Number(p.unplacedMinutes)||0,cu=Number(ctx.unplacedMinutes)||0;
+  if(pu-cu>=15)out.push({key:'change_unplaced_decreased',variants:[`さっきより、予定に入りきっていない分が減りましたね。`,`予定に入っていない分は、さっきより少なくなっていますね。`],speechKind:'acknowledgement',semanticMeaning:'UNPLACED_DECREASED',semanticAngle:'WORKLOAD_CHANGE',utteranceValue:39});
+  else if(cu-pu>=15)out.push({key:'change_unplaced_increased',variants:[`予定に入りきっていない分が、さっきより増えましたね。`,`予定に入っていない分は、さっきより増えているんですね。`],speechKind:'observation',semanticMeaning:'UNPLACED_INCREASED',semanticAngle:'WORKLOAD_CHANGE',utteranceValue:35});
+  const pn=String(p.nextPlan||''),cn=String(ctx.nextPlan||'');
+  if(cn&&pn!==cn){
+    out.push({key:'change_next_plan',variants:[pn?`次の予定は${cn}に変わったんですね。`:`次の予定に${cn}が入ったんですね。`],speechKind:'acknowledgement',semanticMeaning:'NEXT_PLAN_CHANGED',semanticAngle:'SCHEDULE_CHANGE',utteranceValue:38});
+  }else if(cn&&pn===cn&&p.dateTime&&ctx.dateTime&&ctx.nextPlanTime){
+    const before=mvMinutesUntil(ctx.nextPlanTime,p.dateTime),after=mvMinutesUntil(ctx.nextPlanTime,ctx.dateTime);
+    if(before!==null&&after!==null&&before-after>=5&&after>=0){
+      out.push({key:'change_next_closer',variants:[`${cn}が、さっきより近づいてきましたね。`],speechKind:'observation',semanticMeaning:'NEXT_PLAN_GOT_CLOSER',semanticAngle:'TIME_PROGRESS_CHANGE',utteranceValue:34});
+    }
+  }
+  return out;
+}
+function mvMizukiExplicitDifferenceCandidates(ctx){
+  const t=String(ctx.change||''),out=[];
+  if(/(いつも|普段)より.{0,8}(早い|早め|早く)/.test(t))out.push({key:'difference_early_start',variants:[`今日はいつもより早いスタートなんですね。`],speechKind:'care',semanticMeaning:'UNUSUALLY_EARLY_START',semanticAngle:'USUAL_COMPARISON',utteranceValue:29});
+  if(/(いつも|普段)より.{0,12}予定.{0,6}(多い|多め)/.test(t)||/予定.{0,6}(多い|多め).{0,10}(いつも|普段)より/.test(t))out.push({key:'difference_more_plans',variants:[`今日はいつもより予定が多いんですね。`],speechKind:'observation',semanticMeaning:'UNUSUALLY_MORE_PLANS',semanticAngle:'USUAL_COMPARISON',utteranceValue:28});
+  if(/(いつも|普段)より.{0,12}予定.{0,6}(少ない|少なめ)/.test(t)||/予定.{0,6}(少ない|少なめ).{0,10}(いつも|普段)より/.test(t))out.push({key:'difference_fewer_plans',variants:[`今日はいつもより予定が少なめなんですね。`],speechKind:'observation',semanticMeaning:'UNUSUALLY_FEWER_PLANS',semanticAngle:'USUAL_COMPARISON',utteranceValue:28});
+  if(/昨日より.{0,10}(早く|早め).{0,8}(終|区切)/.test(t))out.push({key:'difference_earlier_finish',variants:[`今日は昨日より早めに一区切りつきそうなんですね。`],speechKind:'observation',semanticMeaning:'EARLIER_FINISH_THAN_YESTERDAY',semanticAngle:'YESTERDAY_COMPARISON',utteranceValue:27});
+  return out;
+}
+function mvMizukiSmallTalkCandidates(ctx){
+  const d=new Date(ctx.dateTime);if(Number.isNaN(d.getTime()))return [];
+  const out=[],month=d.getMonth()+1,day=d.getDate(),weekday=d.getDay(),h=d.getHours();
+  if(weekday===1)out.push({key:'smalltalk_monday',variants:[`月曜日ですね。今週も始まりましたね。`,`今日は月曜日なんですね。`],speechKind:'smalltalk',semanticMeaning:'SMALLTALK_WEEKDAY_MONDAY',semanticAngle:'WEEKDAY',utteranceValue:13});
+  if(weekday===5)out.push({key:'smalltalk_friday',variants:[`金曜日まで来ましたね。`,`今日は金曜日なんですね。`],speechKind:'smalltalk',semanticMeaning:'SMALLTALK_WEEKDAY_FRIDAY',semanticAngle:'WEEKDAY',utteranceValue:13});
+  if(day<=2)out.push({key:'smalltalk_month_start',variants:[`今日から${month}月ですね。`,`${month}月が始まったところですね。`],speechKind:'smalltalk',semanticMeaning:'SMALLTALK_MONTH_START',semanticAngle:'CALENDAR_PHASE',utteranceValue:12});
+  else if(day>=25){const nextMonth=month===12?1:month+1;out.push({key:'smalltalk_month_end',variants:[`今月もそろそろ終わりですね。`,`もうすぐ${nextMonth}月ですね。`],speechKind:'smalltalk',semanticMeaning:'SMALLTALK_MONTH_END',semanticAngle:'CALENDAR_PHASE',utteranceValue:14});}
+  else if(day>=20)out.push({key:'smalltalk_late_month',variants:[`もう${month}月も後半ですね。`,`${month}月も後半に入りましたね。`],speechKind:'smalltalk',semanticMeaning:'SMALLTALK_LATE_MONTH',semanticAngle:'CALENDAR_PHASE',utteranceValue:13});
+  if(month===8&&day>=20)out.push({key:'smalltalk_late_summer',variants:[`夏もそろそろ終盤ですね。`,`夏も後半の時期ですね。`],speechKind:'smalltalk',semanticMeaning:'SMALLTALK_SEASON_LATE_SUMMER',semanticAngle:'SEASON',utteranceValue:11});
+  if(month===12&&day>=20)out.push({key:'smalltalk_year_end',variants:[`今年も残り少なくなってきましたね。`,`もう年末が近い時期ですね。`],speechKind:'smalltalk',semanticMeaning:'SMALLTALK_YEAR_END',semanticAngle:'CALENDAR_PHASE',utteranceValue:12});
+  if(h===12)out.push({key:'smalltalk_noon',variants:[`もうお昼ですね。`,`お昼の時間になりましたね。`],speechKind:'smalltalk',semanticMeaning:'SMALLTALK_DAYPART_NOON',semanticAngle:'TIME_OF_DAY',utteranceValue:12});
+  else if(h>=13&&h<16)out.push({key:'smalltalk_afternoon',variants:[`午後に入りましたね。`,`もう午後なんですね。`],speechKind:'smalltalk',semanticMeaning:'SMALLTALK_DAYPART_AFTERNOON',semanticAngle:'TIME_OF_DAY',utteranceValue:10});
+  else if(h>=16&&h<19)out.push({key:'smalltalk_evening',variants:[`もう夕方ですね。`,`夕方の時間になりましたね。`],speechKind:'smalltalk',semanticMeaning:'SMALLTALK_DAYPART_EVENING',semanticAngle:'TIME_OF_DAY',utteranceValue:12});
+  // 天候・気象は日付から推測しない。Small Talkはカレンダー／時間帯だけ。
+  return out;
+}
+function mvMizukiContinuityCandidates(ctx){
+  const recent=mvMizukiRecentSameStateUsage(ctx),out=[];
+  if(!recent.meanings.size)return out;
+  if((ctx.kind==='many_plans'||ctx.kind==='unplaced_large'))out.push({key:'continuity_busy_flow',variants:[`まだ忙しい流れが続いていますね。`,`予定が詰まった流れは、まだ続いていますね。`],speechKind:'continuity',semanticMeaning:'BUSY_FLOW_CONTINUES',semanticAngle:'CONVERSATION_CONTINUITY',utteranceValue:14});
+  else if(ctx.kind==='in_task'&&ctx.currentTask)out.push({key:'continuity_current_task',variants:[`今も${ctx.currentTask}の流れが続いていますね。`],speechKind:'continuity',semanticMeaning:'CURRENT_TASK_CONTINUES',semanticAngle:'CONVERSATION_CONTINUITY',utteranceValue:12});
+  return out;
+}
+function mvMizukiDailyFrequencyGroup(meaning,speechKind){
+  const m=String(meaning||'');
+  if(/^SMALLTALK_WEEKDAY_/.test(m))return 'DAILY_SMALLTALK_WEEKDAY';
+  if(/^SMALLTALK_(MONTH_|LATE_MONTH|YEAR_END)/.test(m))return 'DAILY_SMALLTALK_CALENDAR_PHASE';
+  if(/^SMALLTALK_SEASON_/.test(m))return 'DAILY_SMALLTALK_SEASON';
+  if(/^SMALLTALK_DAYPART_/.test(m))return `DAILY_${m}`;
+  if(['HOLIDAY_WORK_STATE','HOLIDAY_WORK_APPRECIATION','HOLIDAY_WORK_ACK'].includes(m))return 'DAILY_HOLIDAY_WORK_CONTEXT';
+  if(['AFTER_HOLIDAY_CARE','LONG_OVERTIME_TREND_ACK','EARLY_START_CARE','END_OF_WORK_APPRECIATION','BUSY_DAY_ACK'].includes(m))return `DAILY_${m}`;
+  return null;
+}
+function mvMizukiDailyUsage(ctx){
+  const day=mvMizukiDateKey(ctx.dateTime),groups=new Set();if(!day)return groups;
+  for(const r of minimoValidation.records){
+    if(!r||r.persona!=='mizuki'||!String(r.batchId||'').startsWith('single-')||!r.scenario)continue;
+    if(mvMizukiDateKey(r.scenario.dateTime)!==day)continue;
+    const logic=r.labLogic||{},g=mvMizukiDailyFrequencyGroup(logic.semanticMeaning,logic.speechKind);
+    if(g)groups.add(g);
+  }
+  return groups;
+}
+// ---- 2026-08-23 Stage5: 美月の労い／気遣いFACT判定（Labのみ） ----
+// 体調・感情は推測せず、既存入力から明示または確定できるFACTだけを使う。
+function mvMizukiCareFacts(ctx){
+  const change=String(ctx.change||'');
+  const workStatus=String(ctx.workStatus||'');
+  const kind=String(ctx.kind||'');
+  return {
+    holidayWork: workStatus==='休日出勤'||kind==='holiday_work',
+    afterHoliday: /休み明け|休日明け|連休明け/.test(change),
+    overtimeHigh: kind==='end_2h'||/残業.{0,6}(多|長)|終業.{0,8}(遅|超)|長時間残業/.test(change),
+    majorTaskCompleted: ['one_done','multi_done','task_switched'].includes(kind)&&/長時間|長め|大きな業務|重要業務|大きな仕事/.test(change),
+    busyDay: kind==='many_plans'||/予定.{0,6}(かなり|非常に).{0,4}(詰|多)|忙しい日/.test(change),
+    earlyStart: /早いスタート|早朝勤務|朝早く/.test(change)
+  };
+}
+// ---- 2026-08-23 Stage4: 同一状況での会話枯渇処理（Labのみ） ----
+function mvMizukiStateKey(ctx){
+  const d=new Date(ctx.dateTime);let timeBucket='';
+  if(!Number.isNaN(d.getTime())){
+    const mm=Math.floor(d.getMinutes()/10)*10;
+    timeBucket=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+  }
+  return [ctx.kind||'',ctx.workStatus||'',timeBucket,ctx.currentTask||'',ctx.currentStart||'',ctx.currentEnd||'',ctx.nextPlan||'',ctx.nextPlanTime||'',String(Number(ctx.unplacedMinutes)||0),(ctx.completedTasks||[]).join('>'),ctx.change||''].join('||');
+}
+function mvMizukiSemanticGroup(intent,meaning,angle){
+  const kind=intent.ctx.kind,m=meaning||'',a=angle||'';
+  if(/^SMALLTALK_/.test(m))return 'SMALLTALK_STATE';
+  if(['PREVIOUS_TASK_COMPLETED','CURRENT_TASK_CHANGED'].includes(m))return 'CHANGE_TASK_TRANSITION';
+  if(['UNPLACED_DECREASED','UNPLACED_INCREASED'].includes(m))return 'CHANGE_WORKLOAD';
+  if(['NEXT_PLAN_CHANGED','NEXT_PLAN_GOT_CLOSER'].includes(m))return 'CHANGE_NEXT';
+  if(['UNUSUALLY_EARLY_START','EARLY_START_CARE'].includes(m))return 'EARLY_START_CONTEXT';
+  if(['UNUSUALLY_MORE_PLANS','UNUSUALLY_FEWER_PLANS','EARLIER_FINISH_THAN_YESTERDAY'].includes(m))return m;
+  if(['HOLIDAY_WORK_APPRECIATION','MAJOR_TASK_COMPLETED_APPRECIATION','END_OF_WORK_APPRECIATION'].includes(m))return m;
+  if(['HOLIDAY_WORK_ACK','AFTER_HOLIDAY_CARE','LONG_OVERTIME_CARE','LONG_OVERTIME_TREND_ACK','BUSY_DAY_ACK','EARLY_START_CARE','MULTIPLE_COMPLETED_ACK'].includes(m))return m;
+  if(kind==='pre_start'){
+    if(['PRE_START_STATE','SCHEDULE_NOT_STARTED'].includes(m))return 'PRE_START_STATE';
+    if(['FIRST_PLAN_START_TIME','TIME_UNTIL_FIRST_PLAN','CLOCK_TO_FIRST_PLAN'].includes(m))return 'PRE_START_TIMING';
+    if(m==='DAY_START_SEQUENCE')return 'PRE_START_SEQUENCE';
+  }
+  if(kind==='next_10'||kind==='next_5'||kind==='next_30'){
+    if(['NEXT_IN_N_MINUTES','NEXT_START_TIME'].includes(m))return 'NEXT_TIMING';
+    if(['CURRENT_TO_NEXT','CURRENT_END_TO_NEXT_START','COMPLETED_TO_NEXT'].includes(m))return 'NEXT_TRANSITION';
+    if(m==='CURRENT_REMAINING_BEFORE_NEXT')return 'CURRENT_BEFORE_NEXT';
+  }
+  if(kind==='one_done'||kind==='multi_done'){
+    if(['COMPLETED_TASK','COMPLETION_ADVANCES_SCHEDULE'].includes(m))return 'COMPLETION_EVENT';
+    if(['COMPLETED_TO_CURRENT','COMPLETED_TO_CURRENT_WINDOW'].includes(m))return 'COMPLETION_TO_NEXT';
+    if(['CURRENT_START_AFTER_COMPLETION','CURRENT_END_AFTER_COMPLETION','CURRENT_WINDOW_AFTER_COMPLETION'].includes(m))return 'NEXT_TASK_TIME';
+  }
+  return m||a||'OTHER';
+}
+function mvMizukiRecentSameStateUsage(ctx){
+  const stateKey=mvMizukiStateKey(ctx),cutoff=Date.now()-30*60*1000;
+  const meanings=new Set(),angles=new Set(),groups=new Set();
+  // Stage4以降の美月レコードだけを後ろから連続して見る。途中でstateKeyが変われば枯渇状態を解除する。
+  for(let i=minimoValidation.records.length-1;i>=0;i--){
+    const r=minimoValidation.records[i];
+    if(!r||r.persona!=='mizuki')continue;
+    const logic=r.labLogic||{};
+    if(!logic.exhaustionStateKey)break; // 旧版履歴は枯渇判定に持ち込まない
+    if(logic.exhaustionStateKey!==stateKey)break;
+    const at=Date.parse(r.at||'');if(Number.isFinite(at)&&at<cutoff)break;
+    if(logic.speechKind==='exhaustion')continue;
+    if(logic.semanticMeaning)meanings.add(logic.semanticMeaning);
+    if(logic.semanticAngle)angles.add(logic.semanticAngle);
+    if(logic.exhaustionGroup)groups.add(logic.exhaustionGroup);
+    else groups.add(mvMizukiSemanticGroup({ctx},logic.semanticMeaning,logic.semanticAngle));
+  }
+  return {stateKey,meanings,angles,groups};
+}
+function mvMizukiExhaustionVariants(intent){
+  const c=intent.ctx,next=c.nextPlan||'',current=c.currentTask||'';
+  const specific=[];
+  if(c.kind==='pre_start')specific.push('……まだ始業前のままですね。','今はまだ、さっきと同じ始業前の状況ですね。');
+  else if(c.kind==='one_done'||c.kind==='multi_done')specific.push('……ひと区切りついたあとの状況は、まだ変わっていませんね。','今のところ、一区切りついたあとの流れはさっきと同じですね。');
+  else if(['next_5','next_10','next_30'].includes(c.kind)&&next)specific.push(`……${next}までの状況は、さっきと同じですね。`,`今のところ、${next}まわりはさっきから変わっていませんね。`);
+  else if(c.kind==='in_task'&&current)specific.push(`……${current}の状況は、さっきから変わっていませんね。`,`今のところ、${current}を進めている流れはさっきと同じですね。`);
+  else if(c.kind==='unplaced_large')specific.push('……予定の詰まり方は、さっきから変わっていませんね。','今のところ、予定に入りきらない状況はさっきと同じですね。');
+  return [...specific,
+    'さっきから状況はあまり変わっていませんね。',
+    '今のところ、新しくお伝えできることはなさそうです。',
+    'まだ大きく状況は変わっていませんね。',
+    '今はさっきと同じ感じですね。',
+    'また何か動いたら、そのとき見てみましょう。',
+    '……。',
+    '……まだ状況はあまり変わっていませんね。',
+    '今は追加でお伝えすることはなさそうです。',
+    'もう新しく言えることはありませんよ。',
+    '今はこのままですね。何か変わったらまた見てみましょう。'
+  ];
+}
+function mvRenderMizukiExhaustion(intent,seed,used){
+  const variants=mvMizukiExhaustionVariants(intent),start=((seed%variants.length)+variants.length)%variants.length;
+  for(let i=0;i<variants.length;i++){
+    const text=variants[(start+i)%variants.length].trim();
+    if(text&&!used.has(text))return {text,topic:'conversation_exhaustion',speechKind:'exhaustion',semanticMeaning:'NO_NEW_HIGH_VALUE_INFORMATION',semanticAngle:'REPEATED_CALL_ACKNOWLEDGEMENT',exhausted:true};
+  }
+  // 短時間に候補を使い切った場合も業務Adviceへ戻さない。
+  const text=`${mvClockLabel(intent.ctx.dateTime)}ごろの状況は、さっきから変わっていませんね。`;
+  return {text,topic:'conversation_exhaustion_time',speechKind:'exhaustion',semanticMeaning:'STATE_UNCHANGED',semanticAngle:'WAIT_FOR_CHANGE',exhausted:true};
+}
 function mvMizukiValidationCandidates(intent){
   const c=intent.ctx,n=intent.nextMin,items=[],keys=new Set();
   const add=(key,variants,speechKind='observation',meta={})=>{
@@ -418,6 +622,10 @@ function mvMizukiValidationCandidates(intent){
   const nextExact=(next&&nextTimeLabel)?`${next}は${nextTimeLabel}からなんですね。`:'';
   const untilNext=(next&&n!==null)?(n<=5?`${next}までもうすぐですね。`:n<=10?`${next}まであと${Math.max(0,n)}分ですね。`:n<=30?`${next}まであと${n}分ですね。`:`このあとは${next}なんですね。`):'';
   const unplacedText=c.unplacedMinutes>=120?`今日は予定に入りきらない分がかなりありますね。`:c.unplacedMinutes>0?`予定に入りきっていない分が少しありますね。`:`今のところ、予定の中に収まっていますね。`;
+
+  // Stage6: 現在状態の読み上げより、実際に確認できる「前回からの変化」を優先する。
+  for(const x of mvMizukiChangeCandidates(c))add(x.key,x.variants,x.speechKind,{semanticMeaning:x.semanticMeaning,semanticAngle:x.semanticAngle,utteranceValue:x.utteranceValue});
+  for(const x of mvMizukiExplicitDifferenceCandidates(c))add(x.key,x.variants,x.speechKind,{semanticMeaning:x.semanticMeaning,semanticAngle:x.semanticAngle,utteranceValue:x.utteranceValue});
 
   // 各シナリオ固有の「最初に口にする価値がある観察」を先に並べる。
   switch(c.kind){
@@ -462,15 +670,16 @@ function mvMizukiValidationCandidates(intent){
       if(current&&next)add('current_before_next',[`今は${current}をしていて、このあと${next}なんですね。`,`${current}のあとに${next}が控えているんですね。`],'observation',{semanticMeaning:'CURRENT_TO_NEXT',semanticAngle:'CURRENT_TO_NEXT',utteranceValue:30});
       if(completed.length&&next)add('completed_to_next',[`${completedList}は終わっていて、このあと${next}なんですね。`,`${completedList}を終えて、次は${next}なんですね。`],'observation',{semanticMeaning:'COMPLETED_TO_NEXT',semanticAngle:'PREVIOUS_TO_NEXT',utteranceValue:24});
       if(current&&next&&currentEndLabel&&nextTimeLabel)add('current_end_to_next',[`${current}は${currentEndLabel}までで、${next}は${nextTimeLabel}からなんですね。`,`${current}の区切りが${currentEndLabel}ごろで、そのあと${next}なんですね。`],'observation',{semanticMeaning:'CURRENT_END_TO_NEXT_START',semanticAngle:'SCHEDULE_RELATION',utteranceValue:22});
-      if(current&&currentEndMin!==null&&currentEndMin>=0)add('current_remaining_before_next',[`${current}はあと${currentEndMin}分ほどで一区切りの予定なんですね。`,`${current}はあと${currentEndMin}分くらいで終わる予定なんですね。`],'observation',{semanticMeaning:'CURRENT_REMAINING_BEFORE_NEXT',semanticAngle:'CURRENT_TIME_CONTEXT',utteranceValue:21});
+      if(current&&currentEndMin!==null&&currentEndMin>=0)add('current_remaining_before_next',[`${current}はあと${currentEndMin}分ほどで終わる予定なんですね。`,`${current}はあと${currentEndMin}分くらいで終わる予定なんですね。`],'observation',{semanticMeaning:'CURRENT_REMAINING_BEFORE_NEXT',semanticAngle:'CURRENT_TIME_CONTEXT',utteranceValue:21});
       if(c.unplacedMinutes>0)add('unplaced_observation',[`予定に入りきっていない分も少し残っていますね。`,`まだ予定に入っていない分もあるんですね。`],'observation',{semanticMeaning:'UNPLACED_REMAINS',semanticAngle:'WORKLOAD_OBSERVATION',utteranceValue:6});
       if(c.kind==='next_5'||c.kind==='next_10')add('upcoming_advice',[`もうすぐ${next||'次の予定'}なので、新しいことを増やさず切り替えられる状態にしておくとよさそうです。`,`そろそろ${next||'次の予定'}に向けて、手を止めやすいところまででよさそうです。`],'advice',{semanticMeaning:'PREPARE_FOR_NEXT',semanticAngle:'ADVICE',utteranceValue:-8});
       else add('upcoming_no_new',[`次の予定までは、まだ少し間がありますね。`,`今のところ、次の予定まで少し余裕がありますね。`],'noNewInformation',{semanticMeaning:'UPCOMING_NO_CHANGE',semanticAngle:'NO_NEW_INFORMATION',utteranceValue:-20});
       break;
     case 'one_done':case 'multi_done':
-      if(completed.length)add('completed_specific',[completed.length===1?`${completedOne}は終わったんですね。`:`${completedList}まで終わったんですね。`,completed.length===1?`${completedOne}が一区切りついたんですね。`:`いくつか一区切りついたんですね。`],'observation',{semanticMeaning:'COMPLETED_TASK',semanticAngle:'COMPLETION_REACTION',utteranceValue:32});
+      if(completed.length)add('completed_specific',[completed.length===1?`${completedOne}は終わったんですね。`:`${completedList}まで終わったんですね。`,completed.length===1?`${completedOne}が一区切りついたんですね。`:`いくつか一区切りついたんですね。`],'acknowledgement',{semanticMeaning:'COMPLETED_TASK',semanticAngle:'COMPLETION_REACTION',utteranceValue:32});
+      if(c.kind==='multi_done'&&completed.length>1)add('multi_completed_ack',[`今日はもういくつか片づいているんですね。`,`今日はここまで結構進んでいますね。`],'acknowledgement',{semanticMeaning:'MULTIPLE_COMPLETED_ACK',semanticAngle:'PROGRESS_ACKNOWLEDGEMENT',utteranceValue:25});
       if(completedOne&&current)add('completed_to_current',current==='次の業務'?[`${completedOne}が終わって、次の業務へ移るところなんですね。`,`${completedOne}を終えて、次の作業に切り替わるところなんですね。`]:[`${completedOne}が終わって、このあとは${current}なんですね。`,`${completedOne}を終えて、次は${current}なんですね。`],'observation',{semanticMeaning:'COMPLETED_TO_CURRENT',semanticAngle:'PREVIOUS_TO_CURRENT',utteranceValue:29});
-      if(completedOne)add('completion_progress_shift',[`${completedOne}が終わって、予定が一つ先に進んだんですね。`,`${completedOne}が終わって、今日の流れが一つ進んだんですね。`],'observation',{semanticMeaning:'COMPLETION_ADVANCES_SCHEDULE',semanticAngle:'PROGRESS_CHANGE',utteranceValue:27});
+      if(completedOne)add('completion_progress_shift',[`${completedOne}が終わって、予定が一つ先に進んだんですね。`,`${completedOne}が終わって、今日の流れが一つ進んだんですね。`],'acknowledgement',{semanticMeaning:'COMPLETION_ADVANCES_SCHEDULE',semanticAngle:'PROGRESS_CHANGE',utteranceValue:27});
       if(current&&currentStartLabel)add('current_start_after_done',[`${current}は${currentStartLabel}からなんですね。`,current==='次の業務'?`次の業務は${currentStartLabel}からなんですね。`:`このあとの${current}は${currentStartLabel}からなんですね。`],'observation',{semanticMeaning:'CURRENT_START_AFTER_COMPLETION',semanticAngle:'TIME_CONTEXT_START',utteranceValue:24});
       if(current&&currentEndLabel)add('current_end_after_done',[`${current}は${currentEndLabel}までの予定なんですね。`,current==='次の業務'?`次の業務は${currentEndLabel}ごろまでなんですね。`:`このあとの${current}は${currentEndLabel}ごろまでなんですね。`],'observation',{semanticMeaning:'CURRENT_END_AFTER_COMPLETION',semanticAngle:'TIME_CONTEXT_END',utteranceValue:19});
       if(current&&currentStartLabel&&currentEndLabel)add('current_window_after_done',[`${current}は${currentStartLabel}から${currentEndLabel}までの予定なんですね。`,current==='次の業務'?`次の業務は${currentStartLabel}から${currentEndLabel}ごろまでなんですね。`:`このあとの${current}は${currentStartLabel}から${currentEndLabel}ごろまでなんですね。`],'observation',{semanticMeaning:'CURRENT_WINDOW_AFTER_COMPLETION',semanticAngle:'TIME_WINDOW',utteranceValue:17});
@@ -509,18 +718,21 @@ function mvMizukiValidationCandidates(intent){
       add('few_plans_no_new',[`今のところ、急いで詰め込むような流れではなさそうですね。`,`今日は少し余白のある流れですね。`],'noNewInformation');
       break;
     case 'many_plans':
-      add('many_plans',[`今日は予定がかなり詰まっていますね。`,`今日は次々と予定が続く日なんですね。`]);
+      add('many_plans',[`今日は予定がかなり詰まっていますね。`,`今日は次々と予定が続く日なんですね。`],'observation',{semanticMeaning:'MANY_PLANS_STATE',semanticAngle:'SCHEDULE_DENSITY',utteranceValue:30});
+      add('busy_day_care',[`今日はなかなか忙しい流れですね。`,`今日は予定の多い一日なんですね。`],'care',{semanticMeaning:'BUSY_DAY_ACK',semanticAngle:'CARE_WORKLOAD',utteranceValue:25});
       if(current)add('current_task',[`今は${current}なんですね。`]);
       if(next)add('next_plan',[untilNext||`このあとは${next}なんですね。`,nextExact]);
-      if(completedOne)add('completed_specific',[`${completedOne}はもう終わっているんですね。`]);
+      if(completedOne)add('completed_specific',[`${completedOne}はもう終わっているんですね。`],'acknowledgement',{semanticMeaning:'COMPLETED_TASK',semanticAngle:'COMPLETION_REACTION',utteranceValue:18});
       add('many_plans_advice',[`予定が続いているので、今の作業を広げすぎない方がよさそうです。`,`今日は予定が詰まっているので、次の予定に移りやすいところで区切るのがよさそうです。`],'advice');
       break;
     case 'holiday_work':
-      add('holiday_work',[`今日は休日出勤なんですね。`,`お休みの日に勤務しているんですね。`]);
+      add('holiday_work',[`今日は休日出勤なんですね。`,`お休みの日に勤務しているんですね。`],'observation',{semanticMeaning:'HOLIDAY_WORK_STATE',semanticAngle:'WORK_STATUS',utteranceValue:31});
+      add('holiday_work_appreciation',[`今日は休日出勤なんですね。お疲れさまです。`,`お休みの日の勤務なんですね。お疲れさまです。`],'appreciation',{semanticMeaning:'HOLIDAY_WORK_APPRECIATION',semanticAngle:'APPRECIATION',utteranceValue:30});
+      add('holiday_work_difference',[`今日はいつもの勤務日とは少し違いますね。`],'care',{semanticMeaning:'HOLIDAY_WORK_ACK',semanticAngle:'WORKDAY_DIFFERENCE',utteranceValue:24});
       if(current)add('current_task',[`今は${current}なんですね。`]);
       if(c.unplacedMinutes>0)add('unplaced_observation',[unplacedText]);
-      if(completedOne)add('completed_specific',[`${completedOne}はもう終わったんですね。`]);
-      add('holiday_work_advice',[`休日出勤の日なので、今日は必要なところまでで十分そうです。`,`今日は通常の勤務日ではないので、全部を詰め込まなくてもよさそうです。`],'advice');
+      if(completedOne)add('completed_specific',[`${completedOne}はもう終わったんですね。`],'acknowledgement',{semanticMeaning:'COMPLETED_TASK',semanticAngle:'COMPLETION_REACTION',utteranceValue:18});
+      add('holiday_work_advice',[`休日出勤の日なので、今日は必要なところまでで十分そうです。`,`今日は通常の勤務日ではないので、全部を詰め込まなくてもよさそうです。`],'advice',{semanticMeaning:'HOLIDAY_WORK_LIMIT_ADVICE',semanticAngle:'ADVICE',utteranceValue:-12});
       break;
     case 'day_off':
       add('day_off',[`今日はお休みですね。`,`今日は休業日なんですね。`]);
@@ -537,18 +749,20 @@ function mvMizukiValidationCandidates(intent){
       add('end_30_advice',[`終業も近いので、新しいことを増やさず区切りやすいところまででよさそうです。`,`そろそろ締めに入る時間なので、今の作業を広げすぎない方がよさそうです。`],'advice');
       break;
     case 'just_ended':
-      add('just_ended',[`勤務時間はもう終わっていますね。`,`今日はもう終業時刻を過ぎていますね。`]);
-      if(completed.length)add('completed_specific',[`今日はここまでに${completed.length}件、終わっているんですね。`,`${completedList}まで終わっているんですね。`]);
+      add('just_ended',[`勤務時間はもう終わっていますね。`,`今日はもう終業時刻を過ぎていますね。`],'observation',{semanticMeaning:'WORKDAY_ENDED',semanticAngle:'TIME_CONTEXT',utteranceValue:31});
+      add('just_ended_appreciation',[`勤務時間は終わりましたね。お疲れさまでした。`],'appreciation',{semanticMeaning:'END_OF_WORK_APPRECIATION',semanticAngle:'APPRECIATION',utteranceValue:28});
+      if(completed.length)add('completed_specific',[`今日はここまでに${completed.length}件、終わっているんですね。`,`${completedList}まで終わっているんですね。`],'acknowledgement',{semanticMeaning:'MULTIPLE_COMPLETED_ACK',semanticAngle:'PROGRESS_ACKNOWLEDGEMENT',utteranceValue:20});
       if(c.unplacedMinutes>0)add('unplaced_observation',[`まだ予定に入っていない分も残っていますね。`]);
       add('just_ended_advice',[`急ぎでないものは明日に回して、今日はここまででもよさそうです。`,`今日中でなくていいものは、次の勤務日に回してよさそうです。`],'advice');
       add('just_ended_no_new',[`今はちょうど、勤務を終える時間ですね。`,`今日はここで一区切りにできる時間ですね。`],'noNewInformation');
       break;
     case 'end_2h':
-      add('overtime',[`もう終業から2時間ほど経っていますね。`,`今日は勤務時間をかなり越えていますね。`]);
+      add('overtime',[`もう終業から2時間ほど経っていますね。`,`今日は勤務時間をかなり越えていますね。`],'observation',{semanticMeaning:'LONG_OVERTIME_STATE',semanticAngle:'TIME_CONTEXT',utteranceValue:31});
+      add('overtime_care',[`今日は長い一日になっていますね。`,`ここまで勤務時間が長くなっているんですね。`],'care',{semanticMeaning:'LONG_OVERTIME_CARE',semanticAngle:'CARE_TIME_LOAD',utteranceValue:27});
       if(current)add('current_task',[`まだ${current}を続けているんですね。`]);
-      if(completed.length)add('completed_specific',[`今日はここまでに${completed.length}件、終わっているんですね。`]);
+      if(completed.length)add('completed_specific',[`今日はここまでに${completed.length}件、終わっているんですね。`],'acknowledgement',{semanticMeaning:'MULTIPLE_COMPLETED_ACK',semanticAngle:'PROGRESS_ACKNOWLEDGEMENT',utteranceValue:18});
       if(c.unplacedMinutes>0)add('unplaced_observation',[`まだ予定に入りきっていない分も残っていますね。`]);
-      add('overtime_advice',[`もう十分長く続いているので、急ぎでなければ今日は終わりにしてよさそうです。`,`ここからは続けるより、残りを次の勤務日に回す方がよさそうです。`],'advice');
+      add('overtime_advice',[`もう十分長く続いているので、急ぎでなければ今日は終わりにしてよさそうです。`,`ここからは続けるより、残りを次の勤務日に回す方がよさそうです。`],'advice',{semanticMeaning:'OVERTIME_STOP_ADVICE',semanticAngle:'ADVICE',utteranceValue:-12});
       break;
     case 'no_change':
       add('no_change',[`前回から大きな変化はなさそうですね。`,`今のところ、さっきから大きくは変わっていませんね。`]);
@@ -559,6 +773,19 @@ function mvMizukiValidationCandidates(intent){
       break;
   }
 
+  // Stage5: 既存の「前回からの変化」等に明示されたFACTだけからCARE/APPRECIATIONを補う。
+  // 休み明け・週内残業傾向・長時間業務完了など、入力にない事実は推測しない。
+  const careFacts=mvMizukiCareFacts(c);
+  if(careFacts.afterHoliday)add('after_holiday_care',[`今日は休み明けなんですね。`,`休み明けですね。まだいつもの流れに戻る途中かもしれませんね。`],'care',{semanticMeaning:'AFTER_HOLIDAY_CARE',semanticAngle:'CARE_WORKDAY_TRANSITION',utteranceValue:27});
+  if(careFacts.overtimeHigh&&c.kind!=='end_2h'&&/残業/.test(c.change||''))add('overtime_trend_care',[`今週は少し残業が多めなんですね。`,`ここ数日は終わる時間が遅めなんですね。`],'care',{semanticMeaning:'LONG_OVERTIME_TREND_ACK',semanticAngle:'CARE_RECENT_TREND',utteranceValue:26});
+  if(careFacts.majorTaskCompleted&&completedOne)add('major_task_completed_appreciation',[`${completedOne}が終わったんですね。長めの作業、お疲れさまでした。`,`ひと区切りつきましたね。長めの作業、お疲れさまでした。`],'appreciation',{semanticMeaning:'MAJOR_TASK_COMPLETED_APPRECIATION',semanticAngle:'APPRECIATION_COMPLETION',utteranceValue:31});
+  if(careFacts.earlyStart)add('early_start_care',[`今日は少し早いスタートなんですね。`,`朝早くからなんですね。`],'care',{semanticMeaning:'EARLY_START_CARE',semanticAngle:'CARE_TIME_CONTEXT',utteranceValue:23});
+
+  // Stage6: 前回発話の続きと、PC日時だけで確定できるSmall Talkを低優先で統合する。
+  // 重要な業務FACT／変化／労いを押しのけない。天候は一切推測しない。
+  for(const x of mvMizukiContinuityCandidates(c))add(x.key,x.variants,x.speechKind,{semanticMeaning:x.semanticMeaning,semanticAngle:x.semanticAngle,utteranceValue:x.utteranceValue});
+  for(const x of mvMizukiSmallTalkCandidates(c))add(x.key,x.variants,x.speechKind,{semanticMeaning:x.semanticMeaning,semanticAngle:x.semanticAngle,utteranceValue:x.utteranceValue});
+
   // 情報が少ないシナリオだけ、具体情報を補う。Adviceを共通fallbackにはしない。
   if(items.length<5&&current)add('generic_current',[`今は${current}なんですね。`,`${current}を進めているところですね。`]);
   if(items.length<5&&next)add('generic_next',[untilNext||`このあとは${next}なんですね。`,nextExact]);
@@ -568,8 +795,15 @@ function mvMizukiValidationCandidates(intent){
   return items;
 }
 function mvMizukiScenarioRelevance(intent,cand){
-  // 第3段階：成功している in_task / unplaced_large は従来スコアを維持し、弱点3シナリオだけ局所補正する。
+  // 既存のscenario relevanceを維持し、Stage6では変化を最上位、Small Talk／継続を低優先で加える。
   const kind=intent.ctx.kind,key=cand.key;
+  if(key.startsWith('change_'))return 58;
+  if(key.startsWith('difference_'))return 36;
+  if(key.startsWith('smalltalk_'))return 14;
+  if(key.startsWith('continuity_'))return 8;
+  if(key==='after_holiday_care')return 42;
+  if(key==='overtime_trend_care')return 40;
+  if(key==='early_start_care')return 34;
   if(kind==='pre_start'){
     const w={pre_start_state:34,pre_start_first_time:32,pre_start_until_first:30,pre_start_day_sequence:28,pre_start_schedule_not_started:22,pre_start_clock_relation:4,pre_start_no_new:-45};
     return Object.prototype.hasOwnProperty.call(w,key)?w[key]:0;
@@ -579,51 +813,77 @@ function mvMizukiScenarioRelevance(intent,cand){
     return Object.prototype.hasOwnProperty.call(w,key)?w[key]:0;
   }
   if(kind==='one_done'){
-    const w={completed_specific:40,completed_to_current:36,completion_progress_shift:34,current_start_after_done:28,current_end_after_done:26,current_window_after_done:22,completed_to_current_window:20,completed_with_unplaced:-55,progress_no_new:-45};
+    const w={completed_specific:40,major_task_completed_appreciation:38,completed_to_current:36,completion_progress_shift:34,current_start_after_done:28,current_end_after_done:26,current_window_after_done:22,completed_to_current_window:20,completed_with_unplaced:-55,progress_no_new:-45};
+    return Object.prototype.hasOwnProperty.call(w,key)?w[key]:0;
+  }
+  if(kind==='holiday_work'){
+    const w={holiday_work:38,holiday_work_appreciation:42,holiday_work_difference:28,current_task:16,unplaced_observation:4,holiday_work_advice:-42};
+    return Object.prototype.hasOwnProperty.call(w,key)?w[key]:0;
+  }
+  if(kind==='many_plans'){
+    const w={many_plans:34,busy_day_care:30,current_task:20,next_plan:18,completed_specific:12,many_plans_advice:-34};
+    return Object.prototype.hasOwnProperty.call(w,key)?w[key]:0;
+  }
+  if(kind==='end_2h'){
+    const w={overtime:40,overtime_care:36,current_task:20,completed_specific:18,unplaced_observation:5,overtime_advice:-44};
+    return Object.prototype.hasOwnProperty.call(w,key)?w[key]:0;
+  }
+  if(kind==='just_ended'){
+    const w={just_ended:38,just_ended_appreciation:34,completed_specific:24,unplaced_observation:4,just_ended_advice:-42,just_ended_no_new:-45};
     return Object.prototype.hasOwnProperty.call(w,key)?w[key]:0;
   }
   return 0;
 }
-function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning){
-  // FACT・scenario relevance・発話価値を最優先。topic diversityは弱い補助に留める。
+function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups){
+  // 重要な変化 > scenario FACT > 反応／労い > semanticAngle > Small Talk > 枯渇 > Advice。
   let score=100-index*4+(cand.utteranceValue||0)+mvMizukiScenarioRelevance(intent,cand);
-  if(cand.speechKind==='advice')score-=36;               // 数合わせAdviceは禁止
-  if(cand.speechKind==='noNewInformation')score-=46;    // 具体FACTがある限りほぼ選ばない
-  if(cand.key.startsWith('generic_'))score-=34;         // 低価値genericは最後尾
+  if(cand.speechKind==='appreciation')score+=7;
+  if(cand.speechKind==='care')score+=4;
+  if(cand.speechKind==='acknowledgement')score+=5;
+  if(cand.speechKind==='continuity')score-=4;
+  if(cand.speechKind==='smalltalk')score-=8;             // 業務FACTより下、枯渇より上
+  if(cand.speechKind==='advice')score-=36;
+  if(cand.speechKind==='noNewInformation')score-=46;
+  if(cand.key.startsWith('generic_'))score-=34;
   const strictMeaning=['pre_start','next_10','one_done'].includes(intent.ctx.kind);
-  if(usedMeanings.has(cand.semanticMeaning))score-=strictMeaning?58:30; // 弱点シナリオだけ同一意味を強めに抑える（hard exclusionではない）
-  if(usedAngles.has(cand.semanticAngle))score-=strictMeaning?16:12;    // 着眼点の再利用も少し強めに抑える
+  if(usedMeanings.has(cand.semanticMeaning))score-=strictMeaning?58:30;
+  if(usedAngles.has(cand.semanticAngle))score-=strictMeaning?16:12;
   if(lastMeaning===cand.semanticMeaning)score-=strictMeaning?14:8;
-  if(usedTopics.has(cand.key))score-=3;                 // topic再利用自体は許可
+  const group=mvMizukiSemanticGroup(intent,cand.semanticMeaning,cand.semanticAngle);
+  if(usedGroups&&usedGroups.has(group))score-=strictMeaning?54:22;
+  const dailyGroup=mvMizukiDailyFrequencyGroup(cand.semanticMeaning,cand.speechKind);
+  if(dailyGroup&&dailyGroups&&dailyGroups.has(dailyGroup))score-=120; // 同じ意味の季節・曜日・労い等を同日に反復しない
+  if(usedTopics.has(cand.key))score-=3;
   if(lastTopic===cand.key)score-=2;
   return score;
 }
-function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning){
+function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGroups,dailyGroups){
+  if(!['observation','acknowledgement','care','appreciation','continuity','smalltalk'].includes(cand.speechKind))return false;
+  if(cand.key.startsWith('generic_'))return false;
+  if(mvMizukiScenarioRelevance(intent,cand)<=-20)return false;
+  if(usedMeanings.has(cand.semanticMeaning))return false;
+  const group=mvMizukiSemanticGroup(intent,cand.semanticMeaning,cand.semanticAngle);
+  if(usedGroups.has(group))return false;
+  const dailyGroup=mvMizukiDailyFrequencyGroup(cand.semanticMeaning,cand.speechKind);
+  if(dailyGroup&&dailyGroups&&dailyGroups.has(dailyGroup))return false;
+  return score>=82;
+}
+function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups){
   const candidates=mvMizukiValidationCandidates(intent);
-  const ordered=candidates.map((cand,index)=>({cand,index,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning)}))
+  const ordered=candidates.map((cand,index)=>({cand,index,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups)}))
     .sort((a,b)=>b.score-a.score||a.index-b.index);
   for(const entry of ordered){
     const cand=entry.cand;
+    if(!mvMizukiCandidateHasNewHighValue(intent,cand,entry.score,usedMeanings,usedGroups,dailyGroups))continue;
     const start=((seed%cand.variants.length)+cand.variants.length)%cand.variants.length;
     for(let j=0;j<cand.variants.length;j++){
       const text=cand.variants[(start+j)%cand.variants.length].replace(/\s+/g,' ').replace(/。 /g,'。').trim();
-      if(text&&!used.has(text))return {text,topic:cand.key,speechKind:cand.speechKind,semanticMeaning:cand.semanticMeaning,semanticAngle:cand.semanticAngle};
+      // 日付だけから天候・体調・感情を捏造する表現は美月検証経路では採用しない。
+      if(/(今日は暑|今日は寒|雨ですね|雪ですね|台風|疲れています|集中でき|やる気が出)/.test(text))continue;
+      if(text&&!used.has(text))return {text,topic:cand.key,speechKind:cand.speechKind,semanticMeaning:cand.semanticMeaning,semanticAngle:cand.semanticAngle,exhausted:false};
     }
   }
-  // semantic候補を使い切ってもAdviceへ逃げず、具体FACTを組み合わせた観察を優先する。
-  const c=intent.ctx,completed=(c.completedTasks||[]),completedOne=completed.length?completed[completed.length-1]:'';
-  const factFallbacks=[];
-  if(c.currentTask&&c.nextPlan)factFallbacks.push(`今は${c.currentTask}で、このあとは${c.nextPlan}なんですね。`);
-  if(completedOne&&c.currentTask)factFallbacks.push(`${completedOne}は終わって、今は${c.currentTask}なんですね。`);
-  if(c.nextPlan&&c.nextPlanTime)factFallbacks.push(`${c.nextPlan}は${mvJapaneseTime(c.nextPlanTime)}からなんですね。`);
-  if(c.unplacedMinutes>0)factFallbacks.push(`予定に入っていない分が${mvDurationLabel(c.unplacedMinutes)}ほどあるんですね。`);
-  for(const t of factFallbacks)if(t&&!used.has(t))return {text:t,topic:'fact_fallback',speechKind:'observation',semanticMeaning:'FACT_COMBINATION_FALLBACK',semanticAngle:'FACT_RELATION'};
-  const fallbacks=[`今のところ、大きな変化はなさそうですね。`,`今はこの流れのままですね。`,`今のところ、特に新しく言うことはなさそうですね。`];
-  for(const t of fallbacks)if(!used.has(t))return {text:t,topic:'no_new_information',speechKind:'noNewInformation',semanticMeaning:'NO_NEW_INFORMATION',semanticAngle:'ABSTRACT_NO_CHANGE'};
-  // 同一5件セットでfinalTextが重複しないよう、最後も現在時刻を含む別文を試す。
-  const finalFallback=`${mvClockLabel(c.dateTime)}ごろの状況は、今のところ大きく変わっていませんね。`;
-  if(!used.has(finalFallback))return {text:finalFallback,topic:'no_new_information_time',speechKind:'noNewInformation',semanticMeaning:'NO_NEW_INFORMATION_TIME',semanticAngle:'TIME_NO_CHANGE'};
-  return {text:`${mvClockLabel(c.dateTime)}ごろで、今の流れをそのまま見ています。`,topic:'no_new_information_time_2',speechKind:'noNewInformation',semanticMeaning:'NO_NEW_INFORMATION_TIME_2',semanticAngle:'TIME_NO_CHANGE_2'};
+  return mvRenderMizukiExhaustion(intent,seed,used);
 }
 
 function mvRenderComment(intent,persona,seed,used){
@@ -649,17 +909,28 @@ function mvRenderComment(intent,persona,seed,used){
   {const a=[`${c.currentTask||c.nextPlan||'今の一件'}にいったん絞りましょう。全部を一度に考えなくても大丈夫です。`,`まず一つだけ決めて進めましょう。残りはそのあとで大丈夫です。`,`今やる一件だけに目を向ければ十分そうです。`,`全部を同時に抱えず、目の前から一つずつでよさそうです。`,`まず直近の一件を進めて、残りはあとで整理しましょう。`];return a[f];}
 }
 function mvGenerateRecords(ctx,persona,count,batchId){
-  const intent=mvBuildIntent(ctx);const used=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText));const out=[];const usedTopics=new Set(),usedMeanings=new Set(),usedAngles=new Set();let lastTopic=null,lastMeaning=null;
+  const intent=mvBuildIntent(ctx);const used=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText));const out=[];const usedTopics=new Set(),usedMeanings=new Set(),usedAngles=new Set(),usedGroups=new Set();let lastTopic=null,lastMeaning=null;
+  let exhaustionStateKey=null;const dailyGroups=new Set();
+  if(persona==='mizuki'){
+    const recent=mvMizukiRecentSameStateUsage(ctx);exhaustionStateKey=recent.stateKey;
+    recent.meanings.forEach(x=>usedMeanings.add(x));recent.angles.forEach(x=>usedAngles.add(x));recent.groups.forEach(x=>usedGroups.add(x));
+    mvMizukiDailyUsage(ctx).forEach(x=>dailyGroups.add(x));
+  }
   for(let i=0;i<count;i++){
     const seed=(Number(ctx.presetKey)||1)*101+i*17+minimoValidation.records.length;
-    let finalText,semanticFocus=null,speechKind=null,semanticMeaning=null,semanticAngle=null;
+    let finalText,semanticFocus=null,speechKind=null,semanticMeaning=null,semanticAngle=null,exhaustionGroup=null,exhausted=false;
     if(persona==='mizuki'){
-      const rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning);
-      finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;
-      usedTopics.add(rendered.topic);usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);lastTopic=rendered.topic;lastMeaning=semanticMeaning;
+      const rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups);
+      finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;exhausted=!!rendered.exhausted;
+      exhaustionGroup=exhausted?'CONVERSATION_EXHAUSTION':mvMizukiSemanticGroup(intent,semanticMeaning,semanticAngle);
+      usedTopics.add(rendered.topic);lastTopic=rendered.topic;lastMeaning=semanticMeaning;
+      if(!exhausted){
+        usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);usedGroups.add(exhaustionGroup);
+        const dg=mvMizukiDailyFrequencyGroup(semanticMeaning,speechKind);if(dg)dailyGroups.add(dg);
+      }
     }else finalText=mvRenderComment(intent,persona,seed,used);
     used.add(finalText);
-    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle}});
+    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'stage6':null}});
   }
   return out;
 }
