@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>Mizuki Conversation Lab v0.2.4 - Minimo秘書検証・美月自然さ改善</title>
+<title>Mizuki Conversation Lab v0.2.4.1 - Minimo秘書検証・モード切替修正</title>
 <style>
 :root{
   --bg:#f5f6f8;--panel:#ffffff;--text:#17181b;--sub:#6f737b;--line:#e6e8ec;
@@ -217,7 +217,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.2.4 · Minimo秘書検証・美月自然さ改善</div>
+    <div class="version">Mizuki Conversation Lab v0.2.4.1 · Minimo秘書検証・モード切替修正</div>
   </div>
 </div>
 
@@ -225,7 +225,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.2.4-minimo-validation-mizuki-natural';
+const VERSION='0.2.4.1-minimo-validation-mizuki-natural-modefix';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -1631,6 +1631,24 @@ $('#manualScenarioBtn').onclick=manualScenario;
 document.querySelectorAll('[data-clear]').forEach(b=>b.onclick=()=>clearType(b.dataset.clear));
 $('#callName').value=settings.callName||'';
 $('#debugToggle').checked=!!settings.debug;
+
+
+function setLabMode(mode){
+  const isValidation=mode==='validation';
+  $('#conversationModeBtn').classList.toggle('active',!isValidation);
+  $('#minimoModeBtn').classList.toggle('active',isValidation);
+  $('#conversationScenario').style.display=isValidation?'none':'';
+  $('#chat').style.display=isValidation?'none':'';
+  $('#conversationComposer').style.display=isValidation?'none':'';
+  $('#minimoValidationPanel').classList.toggle('show',isValidation);
+  $('#identityMeta').innerHTML=isValidation?'Minimo秘書検証 · Conversation Lab':'<span id="expressionLabel">normal</span> · Mizuki Conversation Lab';
+  if(!isValidation){
+    const last=[...history].reverse().find(x=>x.speaker==='mizuki');
+    updateExpression(last?last.expression:'normal');
+  }else{
+    mvRenderAll();
+  }
+}
 
 // Minimo秘書検証UI初期化
 for(const p of MV_PRESETS){const o=document.createElement('option');o.value=p.key;o.textContent=p.name;$('#mvPreset').appendChild(o)}
