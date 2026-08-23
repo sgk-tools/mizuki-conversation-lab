@@ -217,7 +217,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.2.4.2 Stage6 · HumanContext / SmallTalk / Continuity</div>
+    <div class="version">Mizuki Conversation Lab v0.2.4.2 Stage7 · PriorityFix / ExhaustionGate / HumanNatural</div>
   </div>
 </div>
 
@@ -225,7 +225,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.2.4.2-stage6-human-context-smalltalk-continuity';
+const VERSION='0.2.4.2-stage7-priority-fix-exhaustion-gate-human-natural';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -564,44 +564,73 @@ function mvMizukiRecentSameStateUsage(ctx){
     if(!logic.exhaustionStateKey)break; // 旧版履歴は枯渇判定に持ち込まない
     if(logic.exhaustionStateKey!==stateKey)break;
     const at=Date.parse(r.at||'');if(Number.isFinite(at)&&at<cutoff)break;
-    if(logic.speechKind==='exhaustion')continue;
     if(logic.semanticMeaning)meanings.add(logic.semanticMeaning);
     if(logic.semanticAngle)angles.add(logic.semanticAngle);
-    if(logic.exhaustionGroup)groups.add(logic.exhaustionGroup);
-    else groups.add(mvMizukiSemanticGroup({ctx},logic.semanticMeaning,logic.semanticAngle));
+    if(logic.speechKind!=='exhaustion'){
+      if(logic.exhaustionGroup)groups.add(logic.exhaustionGroup);
+      else groups.add(mvMizukiSemanticGroup({ctx},logic.semanticMeaning,logic.semanticAngle));
+    }
   }
   return {stateKey,meanings,angles,groups};
 }
 function mvMizukiExhaustionVariants(intent){
-  const c=intent.ctx,next=c.nextPlan||'',current=c.currentTask||'';
-  const specific=[];
-  if(c.kind==='pre_start')specific.push('……まだ始業前のままですね。','今はまだ、さっきと同じ始業前の状況ですね。');
-  else if(c.kind==='one_done'||c.kind==='multi_done')specific.push('……ひと区切りついたあとの状況は、まだ変わっていませんね。','今のところ、一区切りついたあとの流れはさっきと同じですね。');
-  else if(['next_5','next_10','next_30'].includes(c.kind)&&next)specific.push(`……${next}までの状況は、さっきと同じですね。`,`今のところ、${next}まわりはさっきから変わっていませんね。`);
-  else if(c.kind==='in_task'&&current)specific.push(`……${current}の状況は、さっきから変わっていませんね。`,`今のところ、${current}を進めている流れはさっきと同じですね。`);
-  else if(c.kind==='unplaced_large')specific.push('……予定の詰まり方は、さっきから変わっていませんね。','今のところ、予定に入りきらない状況はさっきと同じですね。');
-  return [...specific,
-    'さっきから状況はあまり変わっていませんね。',
-    '今のところ、新しくお伝えできることはなさそうです。',
-    'まだ大きく状況は変わっていませんね。',
-    '今はさっきと同じ感じですね。',
-    'また何か動いたら、そのとき見てみましょう。',
-    '……。',
-    '……まだ状況はあまり変わっていませんね。',
-    '今は追加でお伝えすることはなさそうです。',
-    'もう新しく言えることはありませんよ。',
-    '今はこのままですね。何か変わったらまた見てみましょう。'
-  ];
+  // 互換用。実際の選択は mvMizukiExhaustionCandidates() でsemanticMeaning単位に管理する。
+  return mvMizukiExhaustionCandidates(intent).flatMap(x=>x.variants);
 }
-function mvRenderMizukiExhaustion(intent,seed,used){
-  const variants=mvMizukiExhaustionVariants(intent),start=((seed%variants.length)+variants.length)%variants.length;
-  for(let i=0;i<variants.length;i++){
-    const text=variants[(start+i)%variants.length].trim();
-    if(text&&!used.has(text))return {text,topic:'conversation_exhaustion',speechKind:'exhaustion',semanticMeaning:'NO_NEW_HIGH_VALUE_INFORMATION',semanticAngle:'REPEATED_CALL_ACKNOWLEDGEMENT',exhausted:true};
+
+// ---- 2026-08-23 Stage7: 枯渇反応も意味単位で管理する ----
+function mvMizukiExhaustionCandidates(intent){
+  const c=intent.ctx,next=c.nextPlan||'',current=c.currentTask||'',out=[];
+  const add=(semanticMeaning,semanticAngle,variants)=>out.push({semanticMeaning,semanticAngle,variants:variants.filter(Boolean)});
+
+  // 最初の枯渇反応は短い沈黙も許可する。通常candidateとしては使わない。
+  add('QUIET_RESPONSE','QUIET_RESPONSE',['……。']);
+
+  const state=[];
+  if(c.kind==='pre_start')state.push('……まだ始業前のままですね。','今はまだ、さっきと同じ始業前の状況ですね。');
+  else if(c.kind==='one_done'||c.kind==='multi_done')state.push('……ひと区切りついたあとの状況は、まだ変わっていませんね。','今のところ、一区切りついたあとの流れはさっきと同じですね。');
+  else if(['next_5','next_10','next_30'].includes(c.kind)&&next)state.push(`……${next}までの状況は、さっきと同じですね。`,`今のところ、${next}まわりはさっきから変わっていませんね。`);
+  else if(c.kind==='in_task'&&current)state.push(`……${current}の状況は、さっきから変わっていませんね。`,`今のところ、${current}を進めている流れはさっきと同じですね。`);
+  else if(c.kind==='unplaced_large')state.push('……予定の詰まり方は、さっきから変わっていませんね。','今のところ、予定に入りきらない状況はさっきと同じですね。');
+  state.push('まだ大きく状況は変わっていませんね。','今はさっきと同じ感じですね。','……まだ状況はあまり変わっていませんね。');
+  add('STATE_UNCHANGED','STATE_UNCHANGED',state);
+
+  add('NO_NEW_INFORMATION','NO_NEW_INFORMATION',[
+    '今のところ、新しくお伝えできることはなさそうです。',
+    '今は追加でお伝えすることはなさそうです。',
+    'もう新しく言えることはありませんよ。'
+  ]);
+  add('WAIT_FOR_CHANGE','WAIT_FOR_CHANGE',[
+    'また何か動いたら、そのとき見てみましょう。',
+    '今はこのままですね。何か変わったらまた見てみましょう。'
+  ]);
+  add('REPEATED_CALL_ACKNOWLEDGEMENT','REPEATED_CALL_ACKNOWLEDGEMENT',[
+    '今はそんなところですね。',
+    'さっきから状況はあまり変わっていませんね。'
+  ]);
+  return out;
+}
+function mvRenderMizukiExhaustion(intent,seed,used,usedMeanings,lastMeaning){
+  const entries=mvMizukiExhaustionCandidates(intent);
+  // 同じ枯渇semanticMeaningを連続させない。まず未使用意味、その次に直前以外を使う。
+  const passes=[
+    e=>!usedMeanings.has(e.semanticMeaning)&&e.semanticMeaning!==lastMeaning,
+    e=>e.semanticMeaning!==lastMeaning,
+    e=>true
+  ];
+  for(const pass of passes){
+    for(let ei=0;ei<entries.length;ei++){
+      const entry=entries[ei];if(!pass(entry))continue;
+      const variants=entry.variants,start=((seed+ei*3)%variants.length+variants.length)%variants.length;
+      for(let i=0;i<variants.length;i++){
+        const text=variants[(start+i)%variants.length].trim();
+        if(text&&!used.has(text))return {text,topic:'conversation_exhaustion',speechKind:'exhaustion',semanticMeaning:entry.semanticMeaning,semanticAngle:entry.semanticAngle,exhausted:true};
+      }
+    }
   }
-  // 短時間に候補を使い切った場合も業務Adviceへ戻さない。
+  // 全文を使い切った場合もAdviceへ戻らず、時刻を含む状態継続表現にする。
   const text=`${mvClockLabel(intent.ctx.dateTime)}ごろの状況は、さっきから変わっていませんね。`;
-  return {text,topic:'conversation_exhaustion_time',speechKind:'exhaustion',semanticMeaning:'STATE_UNCHANGED',semanticAngle:'WAIT_FOR_CHANGE',exhausted:true};
+  return {text,topic:'conversation_exhaustion_time',speechKind:'exhaustion',semanticMeaning:'STATE_UNCHANGED',semanticAngle:'TIME_CONTEXT_UNCHANGED',exhausted:true};
 }
 function mvMizukiValidationCandidates(intent){
   const c=intent.ctx,n=intent.nextMin,items=[],keys=new Set();
@@ -797,7 +826,31 @@ function mvMizukiValidationCandidates(intent){
 function mvMizukiScenarioRelevance(intent,cand){
   // 既存のscenario relevanceを維持し、Stage6では変化を最上位、Small Talk／継続を低優先で加える。
   const kind=intent.ctx.kind,key=cand.key;
-  if(key.startsWith('change_'))return 58;
+  // Stage7: 状態変化もscenario relevanceを通す。
+  // 変化だから常に最優先、ではなく「今この瞬間の主題」に近い変化を優先する。
+  if(key.startsWith('change_')){
+    if(kind==='one_done'||kind==='multi_done'){
+      const w={change_previous_task_completed:66,change_new_completion:64,change_current_task:54,change_next_plan:34,change_next_closer:28,change_unplaced_decreased:-34,change_unplaced_increased:-38};
+      return Object.prototype.hasOwnProperty.call(w,key)?w[key]:42;
+    }
+    if(kind==='next_10'||kind==='next_5'||kind==='next_30'){
+      const w={change_next_plan:66,change_next_closer:64,change_previous_task_completed:56,change_new_completion:52,change_current_task:48,change_unplaced_decreased:-34,change_unplaced_increased:-38};
+      return Object.prototype.hasOwnProperty.call(w,key)?w[key]:42;
+    }
+    if(kind==='pre_start'){
+      const w={change_next_plan:44,change_next_closer:38,change_unplaced_decreased:-38,change_unplaced_increased:-42,change_current_task:-42,change_previous_task_completed:-42,change_new_completion:-42};
+      return Object.prototype.hasOwnProperty.call(w,key)?w[key]:18;
+    }
+    if(kind==='unplaced_large'){
+      const w={change_unplaced_decreased:68,change_unplaced_increased:68,change_current_task:48,change_next_plan:48,change_next_closer:40,change_previous_task_completed:42,change_new_completion:42};
+      return Object.prototype.hasOwnProperty.call(w,key)?w[key]:46;
+    }
+    if(kind==='in_task'){
+      const w={change_previous_task_completed:62,change_new_completion:60,change_current_task:62,change_next_plan:52,change_next_closer:44,change_unplaced_decreased:18,change_unplaced_increased:14};
+      return Object.prototype.hasOwnProperty.call(w,key)?w[key]:42;
+    }
+    return 58;
+  }
   if(key.startsWith('difference_'))return 36;
   if(key.startsWith('smalltalk_'))return 14;
   if(key.startsWith('continuity_'))return 8;
@@ -835,55 +888,71 @@ function mvMizukiScenarioRelevance(intent,cand){
   return 0;
 }
 function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups){
-  // 重要な変化 > scenario FACT > 反応／労い > semanticAngle > Small Talk > 枯渇 > Advice。
-  let score=100-index*4+(cand.utteranceValue||0)+mvMizukiScenarioRelevance(intent,cand);
+  // Stage7: candidate配列上の位置より「今言う価値」を優先。枯渇判定は全通常候補評価後に行う。
+  let score=100-index*2+(cand.utteranceValue||0)+mvMizukiScenarioRelevance(intent,cand);
   if(cand.speechKind==='appreciation')score+=7;
   if(cand.speechKind==='care')score+=4;
   if(cand.speechKind==='acknowledgement')score+=5;
-  if(cand.speechKind==='continuity')score-=4;
-  if(cand.speechKind==='smalltalk')score-=8;             // 業務FACTより下、枯渇より上
-  if(cand.speechKind==='advice')score-=36;
-  if(cand.speechKind==='noNewInformation')score-=46;
-  if(cand.key.startsWith('generic_'))score-=34;
+  if(cand.speechKind==='continuity')score-=10;
+  if(cand.speechKind==='smalltalk')score-=14;            // scenario FACT > CARE > Small Talk > exhaustion
+  if(cand.speechKind==='advice')score-=54;               // Adviceは枯渇より後。通常穴埋めには使わない
+  if(cand.speechKind==='noNewInformation')score-=70;     // 通常candidateとしては採用しない
+  if(cand.key.startsWith('generic_'))score-=48;
+
   const strictMeaning=['pre_start','next_10','one_done'].includes(intent.ctx.kind);
-  if(usedMeanings.has(cand.semanticMeaning))score-=strictMeaning?58:30;
-  if(usedAngles.has(cand.semanticAngle))score-=strictMeaning?16:12;
-  if(lastMeaning===cand.semanticMeaning)score-=strictMeaning?14:8;
+  if(usedMeanings.has(cand.semanticMeaning))score-=strictMeaning?72:48;
+  if(usedAngles.has(cand.semanticAngle))score-=strictMeaning?18:12;
+  if(lastMeaning===cand.semanticMeaning)score-=strictMeaning?20:12;
+
+  // semanticGroupは「同じ着眼点系列」のsoft penaltyに留める。
+  // START_TIME後のTIME_UNTIL_STARTなど、高価値な別meaning/angleまで消費済みにしない。
   const group=mvMizukiSemanticGroup(intent,cand.semanticMeaning,cand.semanticAngle);
-  if(usedGroups&&usedGroups.has(group))score-=strictMeaning?54:22;
+  if(usedGroups&&usedGroups.has(group))score-=strictMeaning?16:10;
+
   const dailyGroup=mvMizukiDailyFrequencyGroup(cand.semanticMeaning,cand.speechKind);
-  if(dailyGroup&&dailyGroups&&dailyGroups.has(dailyGroup))score-=120; // 同じ意味の季節・曜日・労い等を同日に反復しない
-  if(usedTopics.has(cand.key))score-=3;
-  if(lastTopic===cand.key)score-=2;
+  if(dailyGroup&&dailyGroups&&dailyGroups.has(dailyGroup))score-=120;
+  if(usedTopics.has(cand.key))score-=4;
+  if(lastTopic===cand.key)score-=3;
   return score;
 }
 function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGroups,dailyGroups){
+  // Stage7: exhaustion gateは最後。ここでは「まだ口にする価値がある通常候補か」だけを見る。
   if(!['observation','acknowledgement','care','appreciation','continuity','smalltalk'].includes(cand.speechKind))return false;
   if(cand.key.startsWith('generic_'))return false;
-  if(mvMizukiScenarioRelevance(intent,cand)<=-20)return false;
-  if(usedMeanings.has(cand.semanticMeaning))return false;
-  const group=mvMizukiSemanticGroup(intent,cand.semanticMeaning,cand.semanticAngle);
-  if(usedGroups.has(group))return false;
+  if(cand.speechKind==='noNewInformation'||cand.speechKind==='advice')return false;
+
+  const relevance=mvMizukiScenarioRelevance(intent,cand);
+  if(relevance<=-20)return false;                         // 低関連topicへ逃げない
+  if(usedMeanings.has(cand.semanticMeaning))return false; // 同じ意味の言い換え連発はしない
+
   const dailyGroup=mvMizukiDailyFrequencyGroup(cand.semanticMeaning,cand.speechKind);
   if(dailyGroup&&dailyGroups&&dailyGroups.has(dailyGroup))return false;
-  return score>=82;
+
+  // usedGroupsはhard exclusionにしない。別semanticMeaning/Angleなら高関連FACTを使い切る。
+  // 絶対score閾値を緩め、change候補が先に増えてもscenario FACTが不当に枯渇しないようにする。
+  if(cand.speechKind==='smalltalk')return score>=45;
+  if(cand.speechKind==='continuity')return score>=50;
+  return score>=45;
 }
 function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups){
   const candidates=mvMizukiValidationCandidates(intent);
   const ordered=candidates.map((cand,index)=>({cand,index,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups)}))
     .sort((a,b)=>b.score-a.score||a.index-b.index);
+
+  // 全通常候補を最後まで評価する。ここで一件でも価値ある候補があれば枯渇へ行かない。
   for(const entry of ordered){
     const cand=entry.cand;
     if(!mvMizukiCandidateHasNewHighValue(intent,cand,entry.score,usedMeanings,usedGroups,dailyGroups))continue;
     const start=((seed%cand.variants.length)+cand.variants.length)%cand.variants.length;
     for(let j=0;j<cand.variants.length;j++){
       const text=cand.variants[(start+j)%cand.variants.length].replace(/\s+/g,' ').replace(/。 /g,'。').trim();
-      // 日付だけから天候・体調・感情を捏造する表現は美月検証経路では採用しない。
       if(/(今日は暑|今日は寒|雨ですね|雪ですね|台風|疲れています|集中でき|やる気が出)/.test(text))continue;
       if(text&&!used.has(text))return {text,topic:cand.key,speechKind:cand.speechKind,semanticMeaning:cand.semanticMeaning,semanticAngle:cand.semanticAngle,exhausted:false};
     }
   }
-  return mvRenderMizukiExhaustion(intent,seed,used);
+
+  // 高関連FACT / CARE / APPRECIATION / Small Talk / continuity が本当に尽きた後だけ枯渇。
+  return mvRenderMizukiExhaustion(intent,seed,used,usedMeanings,lastMeaning);
 }
 
 function mvRenderComment(intent,persona,seed,used){
@@ -922,15 +991,16 @@ function mvGenerateRecords(ctx,persona,count,batchId){
     if(persona==='mizuki'){
       const rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups);
       finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;exhausted=!!rendered.exhausted;
-      exhaustionGroup=exhausted?'CONVERSATION_EXHAUSTION':mvMizukiSemanticGroup(intent,semanticMeaning,semanticAngle);
+      exhaustionGroup=exhausted?`CONVERSATION_EXHAUSTION:${semanticMeaning}`:mvMizukiSemanticGroup(intent,semanticMeaning,semanticAngle);
       usedTopics.add(rendered.topic);lastTopic=rendered.topic;lastMeaning=semanticMeaning;
+      usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);
       if(!exhausted){
-        usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);usedGroups.add(exhaustionGroup);
+        usedGroups.add(exhaustionGroup);
         const dg=mvMizukiDailyFrequencyGroup(semanticMeaning,speechKind);if(dg)dailyGroups.add(dg);
       }
     }else finalText=mvRenderComment(intent,persona,seed,used);
     used.add(finalText);
-    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'stage6':null}});
+    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'stage7':null}});
   }
   return out;
 }
