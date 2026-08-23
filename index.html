@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>Mizuki Conversation Lab v0.2.4.2 - Minimo秘書検証・結果表示修正</title>
+<title>Mizuki Conversation Lab v0.2.4.2+MizukiUtteranceValueFix</title>
 <style>
 :root{
   --bg:#f5f6f8;--panel:#ffffff;--text:#17181b;--sub:#6f737b;--line:#e6e8ec;
@@ -217,7 +217,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.2.4.2 · Minimo秘書検証・結果表示修正</div>
+    <div class="version">Mizuki Conversation Lab v0.2.4.2+MizukiUtteranceValueFix · 美月発話価値優先修正</div>
   </div>
 </div>
 
@@ -409,7 +409,7 @@ function mvMizukiValidationCandidates(intent){
   // 各シナリオ固有の「最初に口にする価値がある観察」を先に並べる。
   switch(c.kind){
     case 'pre_start':
-      add('pre_start_state',[`まだ始業前ですね。`,`今はまだ、仕事が始まる前ですね。`]);
+      add('pre_start_state',[`まだ始業前ですね。`,`今はまだ、仕事が始まる前ですね。`,`まだ勤務が始まる前の時間ですね。`,`今は始業前の時間なんですね。`,`仕事が始まるまでは、もう少しありますね。`]);
       add('pre_start_time',[`始業までもう少しありますね。`,`朝のこの時間は、まだ始業前なんですね。`]);
       add('pre_start_first_plan',next?[next.includes('最初の業務')?`今日の最初の予定も入っていますね。`:`今日の最初は${next}なんですね。`,next.includes('最初の業務')?`一日の最初の予定は決まっているんですね。`:`最初の予定は${next}なんですね。`]:[]);
       add('pre_start_day',[`今はまだ、少し余裕がありますね。`,`始業前なので、もう少し間がありますね。`]);
@@ -423,7 +423,7 @@ function mvMizukiValidationCandidates(intent){
       add('just_started_no_new',[`まだ始まったばかりで、大きく動く前ですね。`,`今は一日の入り口ですね。`],'noNewInformation');
       break;
     case 'in_task':
-      if(current)add('current_task',[`今は${current}なんですね。`,`${current}を進めているところですね。`,`いま手を付けているのは${current}なんですね。`]);
+      if(current)add('current_task',[`今は${current}なんですね。`,`${current}を進めているところですね。`,`いま手を付けているのは${current}なんですね。`,`今の時間は${current}なんですね。`,`${current}の途中なんですね。`,`いま取りかかっているのは${current}なんですね。`]);
       if(c.currentEnd)add('current_end',[`${current||'今の業務'}は${currentEndLabel}までの予定なんですね。`,`今の作業は${currentEndLabel}ごろまでなんですね。`]);
       if(next)add('next_plan',[untilNext||`このあとは${next}なんですね。`,nextExact]);
       if(completedOne)add('completed_specific',[`${completedOne}はもう終わったんですね。`,`今日は${completedOne}まで終わっているんですね。`]);
@@ -438,7 +438,7 @@ function mvMizukiValidationCandidates(intent){
       add('transition_no_new',[`今はちょうど、次の作業に馴染むところですね。`,`一区切りの直後なんですね。`],'noNewInformation');
       break;
     case 'next_30':case 'next_10':case 'next_5':
-      if(next)add('upcoming_time',[untilNext||`このあとは${next}なんですね。`,nextExact]);
+      if(next)add('upcoming_time',[untilNext||`このあとは${next}なんですね。`,nextExact,n!==null&&n<=10?`もうすぐ${next}なんですね。`:'',n!==null&&n<=10?`あと${Math.max(0,n)}分で${next}なんですね。`:'',n!==null&&n<=10?`${next}が近づいてきましたね。`:'']);
       if(current)add('current_before_next',[`今は${current}をしていて、このあと${next||'次の予定'}なんですね。`,`${current}のあとに${next||'次の予定'}が控えているんですね。`]);
       if(completed.length)add('completed_specific',[completed.length===1?`${completedOne}はもう終わったんですね。`:`${completedList}はもう終わっているんですね。`,`ここまでに${completed.length}件、区切りがついているんですね。`]);
       if(c.unplacedMinutes>0)add('unplaced_observation',[`予定に入りきっていない分も少し残っていますね。`,`まだ予定に入っていない分もあるんですね。`]);
@@ -446,7 +446,7 @@ function mvMizukiValidationCandidates(intent){
       else add('upcoming_no_new',[`次の予定までは、まだ少し間がありますね。`,`今のところ、次の予定まで少し余裕がありますね。`],'noNewInformation');
       break;
     case 'one_done':case 'multi_done':
-      if(completed.length)add('completed_specific',[completed.length===1?`${completedOne}は終わったんですね。`:`${completedList}まで終わったんですね。`,completed.length===1?`一つ、${completedOne}が片づいたんですね。`:`今日はもういくつか終わっているんですね。`]);
+      if(completed.length)add('completed_specific',[completed.length===1?`${completedOne}は終わったんですね。`:`${completedList}まで終わったんですね。`,completed.length===1?`一つ、${completedOne}が片づいたんですね。`:`今日はもういくつか終わっているんですね。`,completed.length===1?`${completedOne}まで終わったんですね。`:`ここまででいくつか終わっているんですね。`,completed.length===1?`${completedOne}が一区切りついたんですね。`:`いくつか一区切りついたんですね。`,completed.length===1?`ひとまず${completedOne}は片づいたんですね。`:`今日はもう何件か片づいているんですね。`,completed.length===1?`${completedOne}が終わったところなんですね。`:`ちょうどいくつか終わったところなんですね。`]);
       if(current&&currentStartLabel)add('current_start_after_done',[`${current}は${currentStartLabel}からなんですね。`,current==='次の業務'?`次の業務は${currentStartLabel}からなんですね。`:`このあとの${current}は${currentStartLabel}からなんですね。`]);
       if(current&&currentEndLabel)add('current_end_after_done',[`${current}は${currentEndLabel}までの予定なんですね。`,current==='次の業務'?`次の業務は${currentEndLabel}ごろまでなんですね。`:`このあとの${current}は${currentEndLabel}ごろまでなんですね。`]);
       if(c.unplacedMinutes>0)add('unplaced_after_done',[`まだ予定に入りきっていない分もあるんですね。`,`終わったものはありますが、予定に入っていない分も残っているんですね。`]);
@@ -467,7 +467,7 @@ function mvMizukiValidationCandidates(intent){
       add('unplaced_small_no_new',[`今のところ、少しだけ余りがある状態ですね。`,`大きくは崩れていませんが、少しだけ予定外が残っていますね。`],'noNewInformation');
       break;
     case 'unplaced_large':
-      add('unplaced_large',[`今日は予定に入りきらない分がかなりありますね。`,`今日は抱えている量が、予定よりだいぶ多いですね。`]);
+      add('unplaced_large',[`今日は予定に入りきらない分がかなりありますね。`,`今日は抱えている量が、予定よりだいぶ多いですね。`,`今日は予定からあふれている分が多いですね。`,`今日の予定には収まりきらない量なんですね。`,`今日はかなり詰まっていますね。`,`まだ予定に入っていない分がかなりあるんですね。`]);
       if(current)add('current_task',[`今は${current}なんですね。`,`${current}を進めているところですね。`]);
       if(next)add('next_plan',[`このあとは${next}なんですね。`,nextExact]);
       if(completedOne)add('completed_specific',[`${completedOne}はもう終わっているんですね。`,`ここまでで${completedOne}は片づいているんですね。`]);
@@ -539,10 +539,23 @@ function mvMizukiValidationCandidates(intent){
   if(items.length<5)add('generic_clock',[`${mvClockLabel(c.dateTime)}ごろなんですね。`,`今は${mvClockLabel(c.dateTime)}ごろですね。`]);
   return items;
 }
-function mvRenderMizukiValidation(intent,seed,used,usedTopics){
+function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic){
+  // v0.2.5: topic diversityより発話価値を優先する。
+  // 候補はシナリオ固有の重要度順に並んでいるため、その順序を主スコアにする。
+  let score=100-index*10;
+  if(cand.speechKind==='advice')score-=28;             // Adviceは必要時だけ
+  if(cand.speechKind==='noNewInformation')score-=18;  // 具体FACTより下位
+  if(cand.key.startsWith('generic_'))score-=20;       // generic fallbackはさらに下位
+  if(usedTopics.has(cand.key))score-=3;               // hard exclusionではなくsoft penalty
+  if(lastTopic===cand.key)score-=2;                    // 直前同topicも少しだけ避ける
+  return score;
+}
+function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic){
   const candidates=mvMizukiValidationCandidates(intent);
-  const ordered=[...candidates.filter(x=>!usedTopics.has(x.key)),...candidates.filter(x=>usedTopics.has(x.key))];
-  for(const cand of ordered){
+  const ordered=candidates.map((cand,index)=>({cand,index,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic)}))
+    .sort((a,b)=>b.score-a.score||a.index-b.index);
+  for(const entry of ordered){
+    const cand=entry.cand;
     const start=((seed%cand.variants.length)+cand.variants.length)%cand.variants.length;
     for(let j=0;j<cand.variants.length;j++){
       const text=cand.variants[(start+j)%cand.variants.length].replace(/\s+/g,' ').replace(/。 /g,'。').trim();
@@ -578,12 +591,12 @@ function mvRenderComment(intent,persona,seed,used){
   {const a=[`${c.currentTask||c.nextPlan||'今の一件'}にいったん絞りましょう。全部を一度に考えなくても大丈夫です。`,`まず一つだけ決めて進めましょう。残りはそのあとで大丈夫です。`,`今やる一件だけに目を向ければ十分そうです。`,`全部を同時に抱えず、目の前から一つずつでよさそうです。`,`まず直近の一件を進めて、残りはあとで整理しましょう。`];return a[f];}
 }
 function mvGenerateRecords(ctx,persona,count,batchId){
-  const intent=mvBuildIntent(ctx);const used=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText));const out=[];const usedTopics=new Set();
+  const intent=mvBuildIntent(ctx);const used=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText));const out=[];const usedTopics=new Set();let lastTopic=null;
   for(let i=0;i<count;i++){
     const seed=(Number(ctx.presetKey)||1)*101+i*17+minimoValidation.records.length;
     let finalText,semanticFocus=null,speechKind=null;
     if(persona==='mizuki'){
-      const rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics);finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;usedTopics.add(rendered.topic);
+      const rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic);finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;usedTopics.add(rendered.topic);lastTopic=rendered.topic;
     }else finalText=mvRenderComment(intent,persona,seed,used);
     used.add(finalText);
     out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind}});
