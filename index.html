@@ -391,30 +391,44 @@ function mvJapaneseTime(time){
   if(!time)return '';const [h,m]=time.split(':').map(Number);if(!Number.isFinite(h)||!Number.isFinite(m))return time;
   return m?`${h}時${m}分`:`${h}時`;
 }
+function mvDurationLabel(minutes){
+  const m=Math.max(0,Number(minutes)||0);if(!m)return '';
+  const h=Math.floor(m/60),r=m%60;
+  if(h&&r)return `${h}時間${r}分`;
+  if(h)return `${h}時間`;
+  return `${r}分`;
+}
 function mvMizukiValidationCandidates(intent){
   const c=intent.ctx,n=intent.nextMin,items=[],keys=new Set();
-  const add=(key,variants,speechKind='observation')=>{
+  const add=(key,variants,speechKind='observation',meta={})=>{
     if(keys.has(key))return;
     const arr=(Array.isArray(variants)?variants:[variants]).filter(Boolean);
-    if(!arr.length)return;keys.add(key);items.push({key,variants:arr,speechKind});
+    if(!arr.length)return;
+    const semanticMeaning=meta.semanticMeaning||key;
+    const semanticAngle=meta.semanticAngle||semanticMeaning;
+    const utteranceValue=Number.isFinite(meta.utteranceValue)?meta.utteranceValue:0;
+    keys.add(key);items.push({key,variants:arr,speechKind,semanticMeaning,semanticAngle,utteranceValue});
   };
   const current=c.currentTask, next=c.nextPlan, completed=c.completedTasks||[];
   const completedOne=completed.length?completed[completed.length-1]:'';
   const completedList=completed.length>1?completed.slice(-2).join('と'):completedOne;
   const currentStartLabel=mvJapaneseTime(c.currentStart),currentEndLabel=mvJapaneseTime(c.currentEnd),nextTimeLabel=mvJapaneseTime(c.nextPlanTime);
+  const currentEndMin=c.currentEnd?mvMinutesUntil(c.currentEnd,c.dateTime):null;
   const nextExact=(next&&nextTimeLabel)?`${next}は${nextTimeLabel}からなんですね。`:'';
   const untilNext=(next&&n!==null)?(n<=5?`${next}までもうすぐですね。`:n<=10?`${next}まであと${Math.max(0,n)}分ですね。`:n<=30?`${next}まであと${n}分ですね。`:`このあとは${next}なんですね。`):'';
   const unplacedText=c.unplacedMinutes>=120?`今日は予定に入りきらない分がかなりありますね。`:c.unplacedMinutes>0?`予定に入りきっていない分が少しありますね。`:`今のところ、予定の中に収まっていますね。`;
 
   // 各シナリオ固有の「最初に口にする価値がある観察」を先に並べる。
   switch(c.kind){
-    case 'pre_start':
-      add('pre_start_state',[`まだ始業前ですね。`,`今はまだ、仕事が始まる前ですね。`,`まだ勤務が始まる前の時間ですね。`,`今は始業前の時間なんですね。`,`仕事が始まるまでは、もう少しありますね。`]);
-      add('pre_start_time',[`始業までもう少しありますね。`,`朝のこの時間は、まだ始業前なんですね。`]);
-      add('pre_start_first_plan',next?[next.includes('最初の業務')?`今日の最初の予定も入っていますね。`:`今日の最初は${next}なんですね。`,next.includes('最初の業務')?`一日の最初の予定は決まっているんですね。`:`最初の予定は${next}なんですね。`]:[]);
-      add('pre_start_day',[`今はまだ、少し余裕がありますね。`,`始業前なので、もう少し間がありますね。`]);
-      add('pre_start_no_new',[`まだ仕事の流れが動き出す前ですね。`,`仕事が始まるまでは、もう少し静かな時間ですね。`],'noNewInformation');
+    case 'pre_start': {
+      const firstLabel=next?(next.includes('最初の業務')?'最初の業務':next):'';
+      add('pre_start_state',[`まだ始業前ですね。`,`今はまだ、仕事が始まる前ですね。`,`まだ勤務が始まる前の時間ですね。`],'observation',{semanticMeaning:'PRE_START_STATE',semanticAngle:'CURRENT_STATE',utteranceValue:28});
+      if(firstLabel&&nextTimeLabel)add('pre_start_first_time',[`${firstLabel}は${nextTimeLabel}からなんですね。`,`今日は${nextTimeLabel}から${firstLabel}なんですね。`],'observation',{semanticMeaning:'FIRST_PLAN_START_TIME',semanticAngle:'ABSOLUTE_TIME',utteranceValue:24});
+      if(firstLabel&&n!==null&&n>=0)add('pre_start_until_first',[`${firstLabel}まであと${n}分ですね。`,`最初の予定までは、あと${n}分なんですね。`],'observation',{semanticMeaning:'TIME_UNTIL_FIRST_PLAN',semanticAngle:'RELATIVE_TIME',utteranceValue:22});
+      if(firstLabel&&nextTimeLabel)add('pre_start_clock_relation',[`今は${mvClockLabel(c.dateTime)}ごろで、${firstLabel}は${nextTimeLabel}からなんですね。`,`この時間はまだ始業前で、${nextTimeLabel}から${firstLabel}なんですね。`],'observation',{semanticMeaning:'CLOCK_TO_FIRST_PLAN',semanticAngle:'SCHEDULE_RELATION',utteranceValue:19});
+      add('pre_start_no_new',[`まだ仕事の流れが動き出す前ですね。`,`仕事が始まるまでは、もう少し静かな時間ですね。`],'noNewInformation',{semanticMeaning:'PRE_START_NO_CHANGE',semanticAngle:'NO_NEW_INFORMATION',utteranceValue:-20});
       break;
+    }
     case 'just_started':
       add('just_started',[`仕事が始まったところですね。`,`始業したばかりですね。`]);
       if(current)add('current_task',[`今は${current}なんですね。`,`最初は${current}からなんですね。`]);
@@ -423,11 +437,13 @@ function mvMizukiValidationCandidates(intent){
       add('just_started_no_new',[`まだ始まったばかりで、大きく動く前ですね。`,`今は一日の入り口ですね。`],'noNewInformation');
       break;
     case 'in_task':
-      if(current)add('current_task',[`今は${current}なんですね。`,`${current}を進めているところですね。`,`いま手を付けているのは${current}なんですね。`,`今の時間は${current}なんですね。`,`${current}の途中なんですね。`,`いま取りかかっているのは${current}なんですね。`]);
-      if(c.currentEnd)add('current_end',[`${current||'今の業務'}は${currentEndLabel}までの予定なんですね。`,`今の作業は${currentEndLabel}ごろまでなんですね。`]);
-      if(next)add('next_plan',[untilNext||`このあとは${next}なんですね。`,nextExact]);
-      if(completedOne)add('completed_specific',[`${completedOne}はもう終わったんですね。`,`今日は${completedOne}まで終わっているんですね。`]);
-      add('current_flow',[`今のところ、大きな変化はなさそうですね。`,`今のところ、特に大きく変わったところはなさそうですね。`],'noNewInformation');
+      if(current)add('current_task',[`今は${current}なんですね。`,`${current}を進めているところですね。`],'observation',{semanticMeaning:'CURRENT_TASK_IS_X',semanticAngle:'CURRENT_STATE',utteranceValue:30});
+      if(current&&completedOne)add('completed_to_current',[`${completedOne}は終わって、今は${current}なんですね。`,`${completedOne}を終えて、いまは${current}の時間なんですね。`],'observation',{semanticMeaning:'COMPLETED_TO_CURRENT',semanticAngle:'PREVIOUS_TO_CURRENT',utteranceValue:28});
+      if(current&&next)add('current_to_next',[`${current}のあとに${next}が続くんですね。`,`今は${current}で、このあとは${next}なんですね。`],'observation',{semanticMeaning:'CURRENT_TO_NEXT',semanticAngle:'CURRENT_TO_NEXT',utteranceValue:27});
+      if(current&&c.currentEnd)add('current_end',[`${current}は${currentEndLabel}までの予定なんですね。`,`今の${current}は${currentEndLabel}ごろまでなんですね。`],'observation',{semanticMeaning:'CURRENT_TASK_END_TIME',semanticAngle:'TIME_CONTEXT_END',utteranceValue:24});
+      if(current&&c.currentStart)add('current_start_context',[`${current}は${currentStartLabel}から続いているんですね。`,`${current}は${currentStartLabel}から進めているんですね。`],'observation',{semanticMeaning:'CURRENT_TASK_START_TIME',semanticAngle:'TIME_CONTEXT_START',utteranceValue:20});
+      if(next)add('next_plan',[untilNext||`このあとは${next}なんですね。`,nextExact],'observation',{semanticMeaning:'NEXT_PLAN',semanticAngle:'NEXT_STATE',utteranceValue:13});
+      add('current_flow',[`今のところ、大きな変化はなさそうですね。`,`今のところ、特に大きく変わったところはなさそうですね。`],'noNewInformation',{semanticMeaning:'NO_NEW_INFORMATION',semanticAngle:'ABSTRACT_NO_CHANGE',utteranceValue:-25});
       break;
     case 'task_switched':
       if(current&&completedOne)add('transition_specific',[`${completedOne}が終わって、今は${current}なんですね。`,`一つ区切って、${current}に移ったところなんですね。`]);
@@ -438,19 +454,24 @@ function mvMizukiValidationCandidates(intent){
       add('transition_no_new',[`今はちょうど、次の作業に馴染むところですね。`,`一区切りの直後なんですね。`],'noNewInformation');
       break;
     case 'next_30':case 'next_10':case 'next_5':
-      if(next)add('upcoming_time',[untilNext||`このあとは${next}なんですね。`,nextExact,n!==null&&n<=10?`もうすぐ${next}なんですね。`:'',n!==null&&n<=10?`あと${Math.max(0,n)}分で${next}なんですね。`:'',n!==null&&n<=10?`${next}が近づいてきましたね。`:'']);
-      if(current)add('current_before_next',[`今は${current}をしていて、このあと${next||'次の予定'}なんですね。`,`${current}のあとに${next||'次の予定'}が控えているんですね。`]);
-      if(completed.length)add('completed_specific',[completed.length===1?`${completedOne}はもう終わったんですね。`:`${completedList}はもう終わっているんですね。`,`ここまでに${completed.length}件、区切りがついているんですね。`]);
-      if(c.unplacedMinutes>0)add('unplaced_observation',[`予定に入りきっていない分も少し残っていますね。`,`まだ予定に入っていない分もあるんですね。`]);
-      if(c.kind==='next_5'||c.kind==='next_10')add('upcoming_advice',[`もうすぐ${next||'次の予定'}なので、新しいことを増やさず切り替えられる状態にしておくとよさそうです。`,`そろそろ${next||'次の予定'}に向けて、手を止めやすいところまででよさそうです。`],'advice');
-      else add('upcoming_no_new',[`次の予定までは、まだ少し間がありますね。`,`今のところ、次の予定まで少し余裕がありますね。`],'noNewInformation');
+      if(next&&n!==null)add('upcoming_relative_time',[`${next}まであと${Math.max(0,n)}分ですね。`,n<=10?`もうすぐ${next}なんですね。`:`このあと${n}分ほどで${next}なんですね。`],'observation',{semanticMeaning:'NEXT_IN_N_MINUTES',semanticAngle:'RELATIVE_TIME',utteranceValue:32});
+      if(next&&nextTimeLabel)add('upcoming_start_time',[`${next}は${nextTimeLabel}からなんですね。`,`${next}の開始は${nextTimeLabel}なんですね。`],'observation',{semanticMeaning:'NEXT_START_TIME',semanticAngle:'ABSOLUTE_TIME',utteranceValue:27});
+      if(current&&next)add('current_before_next',[`今は${current}をしていて、このあと${next}なんですね。`,`${current}のあとに${next}が控えているんですね。`],'observation',{semanticMeaning:'CURRENT_TO_NEXT',semanticAngle:'CURRENT_TO_NEXT',utteranceValue:30});
+      if(completed.length&&next)add('completed_to_next',[`${completedList}は終わっていて、このあと${next}なんですね。`,`${completedList}を終えて、次は${next}なんですね。`],'observation',{semanticMeaning:'COMPLETED_TO_NEXT',semanticAngle:'PREVIOUS_TO_NEXT',utteranceValue:24});
+      if(current&&next&&currentEndLabel&&nextTimeLabel)add('current_end_to_next',[`${current}は${currentEndLabel}までで、${next}は${nextTimeLabel}からなんですね。`,`${current}の区切りが${currentEndLabel}ごろで、そのあと${next}なんですね。`],'observation',{semanticMeaning:'CURRENT_END_TO_NEXT_START',semanticAngle:'SCHEDULE_RELATION',utteranceValue:22});
+      if(current&&currentEndMin!==null&&currentEndMin>=0)add('current_remaining_before_next',[`${current}はあと${currentEndMin}分ほどで一区切りの予定なんですね。`,`${current}はあと${currentEndMin}分くらいの予定なんですね。`],'observation',{semanticMeaning:'CURRENT_REMAINING_BEFORE_NEXT',semanticAngle:'CURRENT_TIME_CONTEXT',utteranceValue:21});
+      if(c.unplacedMinutes>0)add('unplaced_observation',[`予定に入りきっていない分も少し残っていますね。`,`まだ予定に入っていない分もあるんですね。`],'observation',{semanticMeaning:'UNPLACED_REMAINS',semanticAngle:'WORKLOAD_OBSERVATION',utteranceValue:6});
+      if(c.kind==='next_5'||c.kind==='next_10')add('upcoming_advice',[`もうすぐ${next||'次の予定'}なので、新しいことを増やさず切り替えられる状態にしておくとよさそうです。`,`そろそろ${next||'次の予定'}に向けて、手を止めやすいところまででよさそうです。`],'advice',{semanticMeaning:'PREPARE_FOR_NEXT',semanticAngle:'ADVICE',utteranceValue:-8});
+      else add('upcoming_no_new',[`次の予定までは、まだ少し間がありますね。`,`今のところ、次の予定まで少し余裕がありますね。`],'noNewInformation',{semanticMeaning:'UPCOMING_NO_CHANGE',semanticAngle:'NO_NEW_INFORMATION',utteranceValue:-20});
       break;
     case 'one_done':case 'multi_done':
-      if(completed.length)add('completed_specific',[completed.length===1?`${completedOne}は終わったんですね。`:`${completedList}まで終わったんですね。`,completed.length===1?`一つ、${completedOne}が片づいたんですね。`:`今日はもういくつか終わっているんですね。`,completed.length===1?`${completedOne}まで終わったんですね。`:`ここまででいくつか終わっているんですね。`,completed.length===1?`${completedOne}が一区切りついたんですね。`:`いくつか一区切りついたんですね。`,completed.length===1?`ひとまず${completedOne}は片づいたんですね。`:`今日はもう何件か片づいているんですね。`,completed.length===1?`${completedOne}が終わったところなんですね。`:`ちょうどいくつか終わったところなんですね。`]);
-      if(current&&currentStartLabel)add('current_start_after_done',[`${current}は${currentStartLabel}からなんですね。`,current==='次の業務'?`次の業務は${currentStartLabel}からなんですね。`:`このあとの${current}は${currentStartLabel}からなんですね。`]);
-      if(current&&currentEndLabel)add('current_end_after_done',[`${current}は${currentEndLabel}までの予定なんですね。`,current==='次の業務'?`次の業務は${currentEndLabel}ごろまでなんですね。`:`このあとの${current}は${currentEndLabel}ごろまでなんですね。`]);
-      if(c.unplacedMinutes>0)add('unplaced_after_done',[`まだ予定に入りきっていない分もあるんですね。`,`終わったものはありますが、予定に入っていない分も残っているんですね。`]);
-      add('progress_no_new',[`今はちょうど、一つ終えたあとのタイミングですね。`,`一区切りついた直後なんですね。`],'noNewInformation');
+      if(completed.length)add('completed_specific',[completed.length===1?`${completedOne}は終わったんですね。`:`${completedList}まで終わったんですね。`,completed.length===1?`${completedOne}が一区切りついたんですね。`:`いくつか一区切りついたんですね。`],'observation',{semanticMeaning:'COMPLETED_TASK',semanticAngle:'COMPLETION_REACTION',utteranceValue:32});
+      if(completedOne&&current)add('completed_to_current',current==='次の業務'?[`${completedOne}が終わって、次の業務へ移るところなんですね。`,`${completedOne}を終えて、次の作業に切り替わるところなんですね。`]:[`${completedOne}が終わって、このあとは${current}なんですね。`,`${completedOne}を終えて、次は${current}なんですね。`],'observation',{semanticMeaning:'COMPLETED_TO_CURRENT',semanticAngle:'PREVIOUS_TO_CURRENT',utteranceValue:29});
+      if(current&&currentStartLabel)add('current_start_after_done',[`${current}は${currentStartLabel}からなんですね。`,current==='次の業務'?`次の業務は${currentStartLabel}からなんですね。`:`このあとの${current}は${currentStartLabel}からなんですね。`],'observation',{semanticMeaning:'CURRENT_START_AFTER_COMPLETION',semanticAngle:'TIME_CONTEXT_START',utteranceValue:24});
+      if(current&&currentEndLabel)add('current_end_after_done',[`${current}は${currentEndLabel}までの予定なんですね。`,current==='次の業務'?`次の業務は${currentEndLabel}ごろまでなんですね。`:`このあとの${current}は${currentEndLabel}ごろまでなんですね。`],'observation',{semanticMeaning:'CURRENT_END_AFTER_COMPLETION',semanticAngle:'TIME_CONTEXT_END',utteranceValue:19});
+      if(current&&currentStartLabel&&currentEndLabel)add('current_window_after_done',[`${current}は${currentStartLabel}から${currentEndLabel}までの予定なんですね。`,current==='次の業務'?`次の業務は${currentStartLabel}から${currentEndLabel}ごろまでなんですね。`:`このあとの${current}は${currentStartLabel}から${currentEndLabel}ごろまでなんですね。`],'observation',{semanticMeaning:'CURRENT_WINDOW_AFTER_COMPLETION',semanticAngle:'TIME_WINDOW',utteranceValue:17});
+      if(completedOne&&c.unplacedMinutes>0)add('completed_with_unplaced',[`${completedOne}は終わりましたが、まだ予定に入っていない分もあるんですね。`,`${completedOne}が一区切りついて、予定に入りきっていない分はまだ残っているんですね。`],'observation',{semanticMeaning:'COMPLETED_WITH_UNPLACED_REMAINING',semanticAngle:'PROGRESS_WORKLOAD_RELATION',utteranceValue:15});
+      add('progress_no_new',[`今はちょうど、一つ終えたあとのタイミングですね。`,`一区切りついた直後なんですね。`],'noNewInformation',{semanticMeaning:'POST_COMPLETION_NO_CHANGE',semanticAngle:'NO_NEW_INFORMATION',utteranceValue:-20});
       break;
     case 'unplaced_none':
       add('unplaced_none',[`今のところ、予定の中にきれいに収まっていますね。`,`今日は予定からあふれている仕事はないんですね。`]);
@@ -467,11 +488,13 @@ function mvMizukiValidationCandidates(intent){
       add('unplaced_small_no_new',[`今のところ、少しだけ余りがある状態ですね。`,`大きくは崩れていませんが、少しだけ予定外が残っていますね。`],'noNewInformation');
       break;
     case 'unplaced_large':
-      add('unplaced_large',[`今日は予定に入りきらない分がかなりありますね。`,`今日は抱えている量が、予定よりだいぶ多いですね。`,`今日は予定からあふれている分が多いですね。`,`今日の予定には収まりきらない量なんですね。`,`今日はかなり詰まっていますね。`,`まだ予定に入っていない分がかなりあるんですね。`]);
-      if(current)add('current_task',[`今は${current}なんですね。`,`${current}を進めているところですね。`]);
-      if(next)add('next_plan',[`このあとは${next}なんですね。`,nextExact]);
-      if(completedOne)add('completed_specific',[`${completedOne}はもう終わっているんですね。`,`ここまでで${completedOne}は片づいているんですね。`]);
-      add('unplaced_large_advice',[`今日は全部を収めるのは難しそうです。優先するものだけ決めておくとよさそうです。`,`この量なら、今日やるものと後に回すものを分けた方がよさそうです。`],'advice');
+      add('unplaced_large',[`今日は予定に入りきらない分がかなりありますね。`,`今日はかなり詰まっていますね。`],'observation',{semanticMeaning:'UNPLACED_LARGE',semanticAngle:'WORKLOAD_OBSERVATION',utteranceValue:32});
+      if(c.unplacedMinutes>0)add('unplaced_duration',[`予定に入っていない分が${mvDurationLabel(c.unplacedMinutes)}ほどあるんですね。`,`まだ予定に入っていない分は、時間にすると${mvDurationLabel(c.unplacedMinutes)}くらいなんですね。`],'observation',{semanticMeaning:'UNPLACED_DURATION',semanticAngle:'QUANTITY',utteranceValue:30});
+      if(current)add('current_with_unplaced',[`今は${current}を進めていて、予定に入っていない分もかなりあるんですね。`,`${current}の途中で、まだ予定に入りきっていない分も多いんですね。`],'observation',{semanticMeaning:'CURRENT_WITH_UNPLACED',semanticAngle:'CURRENT_WORKLOAD_RELATION',utteranceValue:27});
+      if(next)add('next_with_unplaced',[`このあと${next}の予定があって、それとは別に予定に入っていない分も多いんですね。`,`${next}も控えていて、まだ予定に入りきっていない分もかなりあるんですね。`],'observation',{semanticMeaning:'NEXT_WITH_UNPLACED',semanticAngle:'SCHEDULE_WORKLOAD_RELATION',utteranceValue:23});
+      if(next&&nextTimeLabel&&c.unplacedMinutes>0)add('next_time_with_unplaced_duration',[`${next}は${nextTimeLabel}からで、予定に入っていない分も${mvDurationLabel(c.unplacedMinutes)}ほどあるんですね。`,`このあと${nextTimeLabel}から${next}があって、予定に入りきっていない分も${mvDurationLabel(c.unplacedMinutes)}ほどあるんですね。`],'observation',{semanticMeaning:'NEXT_TIME_WITH_UNPLACED_DURATION',semanticAngle:'SCHEDULE_QUANTITY_RELATION',utteranceValue:21});
+      if(completedOne)add('completed_with_unplaced',[`${completedOne}は終わっていますが、予定に入っていない分はまだかなりあるんですね。`,`${completedOne}まで終わっていても、まだ予定に入りきっていない分が多いんですね。`],'observation',{semanticMeaning:'COMPLETED_WITH_UNPLACED',semanticAngle:'PROGRESS_WORKLOAD_RELATION',utteranceValue:20});
+      add('unplaced_large_advice',[`今日は全部を収めるのは難しそうです。優先するものだけ決めておくとよさそうです。`,`この量なら、今日やるものと後に回すものを分けた方がよさそうです。`],'advice',{semanticMeaning:'PRIORITIZE_UNPLACED',semanticAngle:'ADVICE',utteranceValue:-8});
       break;
     case 'few_plans':
       add('few_plans',[`今日は予定に少し余裕がありますね。`,`午後は少しゆったりしていますね。`]);
@@ -539,33 +562,45 @@ function mvMizukiValidationCandidates(intent){
   if(items.length<5)add('generic_clock',[`${mvClockLabel(c.dateTime)}ごろなんですね。`,`今は${mvClockLabel(c.dateTime)}ごろですね。`]);
   return items;
 }
-function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic){
-  // v0.2.5: topic diversityより発話価値を優先する。
-  // 候補はシナリオ固有の重要度順に並んでいるため、その順序を主スコアにする。
-  let score=100-index*10;
-  if(cand.speechKind==='advice')score-=28;             // Adviceは必要時だけ
-  if(cand.speechKind==='noNewInformation')score-=18;  // 具体FACTより下位
-  if(cand.key.startsWith('generic_'))score-=20;       // generic fallbackはさらに下位
-  if(usedTopics.has(cand.key))score-=3;               // hard exclusionではなくsoft penalty
-  if(lastTopic===cand.key)score-=2;                    // 直前同topicも少しだけ避ける
+function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning){
+  // topic diversityより、FACT・発話価値・semanticMeaning/着眼点の違いを優先する。
+  let score=100-index*4+(cand.utteranceValue||0);
+  if(cand.speechKind==='advice')score-=36;               // 数合わせAdviceは禁止
+  if(cand.speechKind==='noNewInformation')score-=46;    // 具体FACTがある限りほぼ選ばない
+  if(cand.key.startsWith('generic_'))score-=34;         // 低価値genericは最後尾
+  if(usedMeanings.has(cand.semanticMeaning))score-=30;  // 同じ意味の言い換え連発を強く抑える（hard exclusionではない）
+  if(usedAngles.has(cand.semanticAngle))score-=12;      // 同じ着眼点も少し避ける
+  if(lastMeaning===cand.semanticMeaning)score-=8;       // 直前同semanticMeaningはさらに抑える
+  if(usedTopics.has(cand.key))score-=3;                 // topic再利用自体は許可
+  if(lastTopic===cand.key)score-=2;
   return score;
 }
-function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic){
+function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning){
   const candidates=mvMizukiValidationCandidates(intent);
-  const ordered=candidates.map((cand,index)=>({cand,index,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic)}))
+  const ordered=candidates.map((cand,index)=>({cand,index,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning)}))
     .sort((a,b)=>b.score-a.score||a.index-b.index);
   for(const entry of ordered){
     const cand=entry.cand;
     const start=((seed%cand.variants.length)+cand.variants.length)%cand.variants.length;
     for(let j=0;j<cand.variants.length;j++){
       const text=cand.variants[(start+j)%cand.variants.length].replace(/\s+/g,' ').replace(/。 /g,'。').trim();
-      if(text&&!used.has(text))return {text,topic:cand.key,speechKind:cand.speechKind};
+      if(text&&!used.has(text))return {text,topic:cand.key,speechKind:cand.speechKind,semanticMeaning:cand.semanticMeaning,semanticAngle:cand.semanticAngle};
     }
   }
-  // 候補枯渇時も汎用仕事Adviceへ戻さない。短い観察だけにする。
+  // semantic候補を使い切ってもAdviceへ逃げず、具体FACTを組み合わせた観察を優先する。
+  const c=intent.ctx,completed=(c.completedTasks||[]),completedOne=completed.length?completed[completed.length-1]:'';
+  const factFallbacks=[];
+  if(c.currentTask&&c.nextPlan)factFallbacks.push(`今は${c.currentTask}で、このあとは${c.nextPlan}なんですね。`);
+  if(completedOne&&c.currentTask)factFallbacks.push(`${completedOne}は終わって、今は${c.currentTask}なんですね。`);
+  if(c.nextPlan&&c.nextPlanTime)factFallbacks.push(`${c.nextPlan}は${mvJapaneseTime(c.nextPlanTime)}からなんですね。`);
+  if(c.unplacedMinutes>0)factFallbacks.push(`予定に入っていない分が${mvDurationLabel(c.unplacedMinutes)}ほどあるんですね。`);
+  for(const t of factFallbacks)if(t&&!used.has(t))return {text:t,topic:'fact_fallback',speechKind:'observation',semanticMeaning:'FACT_COMBINATION_FALLBACK',semanticAngle:'FACT_RELATION'};
   const fallbacks=[`今のところ、大きな変化はなさそうですね。`,`今はこの流れのままですね。`,`今のところ、特に新しく言うことはなさそうですね。`];
-  for(const t of fallbacks)if(!used.has(t))return {text:t,topic:'no_new_information',speechKind:'noNewInformation'};
-  return {text:`今は大きな変化はなさそうですね。`,topic:'no_new_information',speechKind:'noNewInformation'};
+  for(const t of fallbacks)if(!used.has(t))return {text:t,topic:'no_new_information',speechKind:'noNewInformation',semanticMeaning:'NO_NEW_INFORMATION',semanticAngle:'ABSTRACT_NO_CHANGE'};
+  // 同一5件セットでfinalTextが重複しないよう、最後も現在時刻を含む別文を試す。
+  const finalFallback=`${mvClockLabel(c.dateTime)}ごろの状況は、今のところ大きく変わっていませんね。`;
+  if(!used.has(finalFallback))return {text:finalFallback,topic:'no_new_information_time',speechKind:'noNewInformation',semanticMeaning:'NO_NEW_INFORMATION_TIME',semanticAngle:'TIME_NO_CHANGE'};
+  return {text:`${mvClockLabel(c.dateTime)}ごろで、今の流れをそのまま見ています。`,topic:'no_new_information_time_2',speechKind:'noNewInformation',semanticMeaning:'NO_NEW_INFORMATION_TIME_2',semanticAngle:'TIME_NO_CHANGE_2'};
 }
 
 function mvRenderComment(intent,persona,seed,used){
@@ -591,15 +626,17 @@ function mvRenderComment(intent,persona,seed,used){
   {const a=[`${c.currentTask||c.nextPlan||'今の一件'}にいったん絞りましょう。全部を一度に考えなくても大丈夫です。`,`まず一つだけ決めて進めましょう。残りはそのあとで大丈夫です。`,`今やる一件だけに目を向ければ十分そうです。`,`全部を同時に抱えず、目の前から一つずつでよさそうです。`,`まず直近の一件を進めて、残りはあとで整理しましょう。`];return a[f];}
 }
 function mvGenerateRecords(ctx,persona,count,batchId){
-  const intent=mvBuildIntent(ctx);const used=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText));const out=[];const usedTopics=new Set();let lastTopic=null;
+  const intent=mvBuildIntent(ctx);const used=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText));const out=[];const usedTopics=new Set(),usedMeanings=new Set(),usedAngles=new Set();let lastTopic=null,lastMeaning=null;
   for(let i=0;i<count;i++){
     const seed=(Number(ctx.presetKey)||1)*101+i*17+minimoValidation.records.length;
-    let finalText,semanticFocus=null,speechKind=null;
+    let finalText,semanticFocus=null,speechKind=null,semanticMeaning=null,semanticAngle=null;
     if(persona==='mizuki'){
-      const rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic);finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;usedTopics.add(rendered.topic);lastTopic=rendered.topic;
+      const rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning);
+      finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;
+      usedTopics.add(rendered.topic);usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);lastTopic=rendered.topic;lastMeaning=semanticMeaning;
     }else finalText=mvRenderComment(intent,persona,seed,used);
     used.add(finalText);
-    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind}});
+    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle}});
   }
   return out;
 }
