@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>Mizuki Conversation Lab v0.2.2</title>
+<title>Mizuki Conversation Lab v0.2.3 - Minimo秘書検証</title>
 <style>
 :root{
   --bg:#f5f6f8;--panel:#ffffff;--text:#17181b;--sub:#6f737b;--line:#e6e8ec;
@@ -68,6 +68,46 @@ button{touch-action:manipulation}
 .notice{font-size:11px;color:var(--sub);line-height:1.5}
 .empty{color:#868a92;text-align:center;font-size:13px;margin-top:40px}
 .version{font-size:11px;color:#8a8e96;text-align:center;margin-top:12px}
+
+.modebar{display:flex;gap:7px;padding:8px 12px 0;background:var(--bg)}
+.modebtn{flex:1;border:1px solid var(--line);background:#fff;color:#60646c;border-radius:11px;padding:8px 9px;font-size:12px;font-weight:700}
+.modebtn.active{background:var(--accent2);border-color:#d8e2ff;color:#315cd6}
+.validation{display:none;flex:1;overflow-y:auto;padding:10px 12px 22px}
+.validation.show{display:block}
+.val-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:12px;margin-bottom:10px;box-shadow:0 4px 14px rgba(0,0,0,.03)}
+.val-title{font-size:15px;font-weight:800;margin-bottom:7px}
+.val-sub{font-size:11px;color:var(--sub);line-height:1.55;margin-bottom:10px}
+.val-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.val-field{min-width:0}
+.val-field.full{grid-column:1/-1}
+.val-field label{font-size:11px;font-weight:700;color:#565a62;display:block;margin-bottom:4px}
+.val-field input,.val-field select,.val-field textarea{width:100%;border:1px solid #dfe2e8;border-radius:10px;padding:8px;background:#fff;outline:none;font-size:13px}
+.val-field textarea{min-height:58px;resize:vertical}
+.val-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+.val-primary,.val-secondary,.val-danger{border:0;border-radius:10px;padding:9px 11px;font-size:12px;font-weight:800}
+.val-primary{background:var(--accent);color:#fff}
+.val-secondary{background:#f0f2f6;color:#4c515a}
+.val-danger{background:#fff0f0;color:#b64242}
+.val-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:8px}
+.val-stat{background:#f6f7f9;border-radius:10px;padding:8px;text-align:center}
+.val-stat b{display:block;font-size:16px}.val-stat span{font-size:10px;color:var(--sub)}
+.val-progress{margin-top:7px;height:7px;background:#eceef2;border-radius:999px;overflow:hidden}
+.val-progress>div{height:100%;background:var(--accent);width:0%}
+.result-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:11px;margin:9px 0}
+.result-head{display:flex;align-items:center;gap:7px;margin-bottom:7px}
+.result-persona{font-weight:800;font-size:12px}.result-scenario{font-size:11px;color:var(--sub);margin-left:auto}
+.result-text{font-size:14px;line-height:1.65;white-space:pre-wrap}
+.result-eval{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px}
+.result-eval button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:7px 6px;font-size:11px;color:#555}
+.result-eval button.selected{border-color:#b9d0ff;background:#f0f5ff;color:#315cd6;font-weight:800}
+.result-eval button.selected.natural{border-color:#b9dfcc;background:#f0faf5;color:var(--ok)}
+.result-improve{margin-top:8px}
+.result-improve textarea{width:100%;min-height:54px;border:1px solid #dfe2e8;border-radius:10px;padding:8px;resize:vertical;font-size:12px}
+.result-improve button{margin-top:5px;border:0;border-radius:9px;padding:7px 9px;background:#edf1ff;color:#345fd8;font-size:11px;font-weight:800}
+.batch-nav{display:flex;gap:7px;align-items:center;margin-top:8px}.batch-nav select{flex:1;border:1px solid #dfe2e8;border-radius:10px;padding:8px;font-size:12px;background:#fff}
+.target-note{font-size:11px;margin-top:6px;color:#666}.target-note.good{color:var(--ok);font-weight:700}
+@media(max-width:380px){.val-grid{grid-template-columns:1fr}.val-field.full{grid-column:auto}.result-eval{grid-template-columns:1fr}}
+
 </style>
 </head>
 <body>
@@ -76,14 +116,18 @@ button{touch-action:manipulation}
     <div class="headrow">
       <div class="avatar" id="avatar">美</div>
       <div class="identity">
-        <div class="name">橘 美月</div>
-        <div class="meta"><span id="expressionLabel">normal</span> · Mizuki Conversation Lab</div>
+        <div class="name" id="identityName">橘 美月</div>
+        <div class="meta" id="identityMeta"><span id="expressionLabel">normal</span> · Mizuki Conversation Lab</div>
       </div>
       <button class="iconbtn" id="settingsBtn" aria-label="設定">⚙︎</button>
     </div>
   </header>
+  <div class="modebar">
+    <button class="modebtn active" id="conversationModeBtn">会話Lab</button>
+    <button class="modebtn" id="minimoModeBtn">Minimo秘書検証</button>
+  </div>
 
-  <section class="scenario">
+  <section class="scenario" id="conversationScenario">
     <div class="scenario-top">
       <div class="testno" id="testNo">TEST 1</div>
       <div class="spacer"></div>
@@ -96,10 +140,55 @@ button{touch-action:manipulation}
     <div class="empty" id="empty">この状況を見て、美月に自由に話しかけてください。</div>
   </main>
 
-  <div class="composer">
+  <div class="composer" id="conversationComposer">
     <textarea id="input" rows="1" placeholder="美月に話しかける…"></textarea>
     <button class="send" id="sendBtn">送信</button>
   </div>
+
+  <section class="validation" id="minimoValidationPanel">
+    <div class="val-card">
+      <div class="val-title">Minimo秘書コメント検証</div>
+      <div class="val-sub">Minimo本体とは完全に分離したLab専用モードです。FACT → 人としての受け取り → 今言う価値 → 過去重複 → 人格 → 自然な一言、の順でコメントを組み立てます。</div>
+      <div class="val-grid">
+        <div class="val-field full"><label>20シナリオ</label><select id="mvPreset"></select></div>
+        <div class="val-field"><label>人格</label><select id="mvPersona"><option value="mizuki">橘 美月</option><option value="rin">黒川 凛</option><option value="reika">神崎 麗華</option></select></div>
+        <div class="val-field"><label>勤務状態</label><select id="mvWorkStatus"><option>通常勤務</option><option>休日出勤</option><option>休業</option></select></div>
+        <div class="val-field full"><label>現在日時</label><input id="mvDateTime" type="datetime-local"></div>
+        <div class="val-field full"><label>現在業務</label><input id="mvCurrentTask" type="text" placeholder="例：資料確認"></div>
+        <div class="val-field"><label>現在業務 開始</label><input id="mvCurrentStart" type="time"></div>
+        <div class="val-field"><label>現在業務 終了</label><input id="mvCurrentEnd" type="time"></div>
+        <div class="val-field full"><label>次予定</label><input id="mvNextPlan" type="text" placeholder="例：アプリ改修"></div>
+        <div class="val-field"><label>次予定時刻</label><input id="mvNextPlanTime" type="time"></div>
+        <div class="val-field"><label>未配置時間（分）</label><input id="mvUnplaced" type="number" min="0" max="1440" step="5" value="0"></div>
+        <div class="val-field full"><label>今日完了した業務</label><textarea id="mvCompleted" placeholder="1行に1件。例：資料確認"></textarea></div>
+        <div class="val-field full"><label>前回からの変化</label><textarea id="mvChange" placeholder="例：一つ完了した／大きな変化なし"></textarea></div>
+      </div>
+      <div class="val-actions">
+        <button class="val-secondary" id="mvApplyPreset">シナリオを反映</button>
+        <button class="val-primary" id="mvGenerate5">この状況で5コメント</button>
+        <button class="val-primary" id="mvGenerate100">美月 20×5＝100件生成</button>
+      </div>
+    </div>
+
+    <div class="val-card">
+      <div class="val-title">評価進捗</div>
+      <div class="val-summary">
+        <div class="val-stat"><b id="mvEvaluated">0</b><span>評価済み</span></div>
+        <div class="val-stat"><b id="mvNatural">0</b><span>自然</span></div>
+        <div class="val-stat"><b id="mvRate">—</b><span>自然率</span></div>
+      </div>
+      <div class="val-progress"><div id="mvProgressBar"></div></div>
+      <div class="target-note" id="mvTarget">最初の目標：100件を評価し、自然率95%以上。</div>
+      <div class="batch-nav"><select id="mvScenarioFilter"></select></div>
+      <div class="val-actions">
+        <button class="val-secondary" id="mvExport">検証データをJSON出力</button>
+        <button class="val-danger" id="mvClear">検証履歴をクリア</button>
+      </div>
+    </div>
+
+    <div id="mvResults"></div>
+  </section>
+
 </div>
 
 <div class="overlay" id="settingsOverlay">
@@ -127,7 +216,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.2.2 single HTML</div>
+    <div class="version">Mizuki Conversation Lab v0.2.3 · Minimo秘書検証</div>
   </div>
 </div>
 
@@ -135,7 +224,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.2.2-single';
+const VERSION='0.2.3-minimo-validation';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -144,7 +233,9 @@ const K={
   scenario:'mcl_scenario_v012',
   testNo:'mcl_test_no_v012',
   coverage:'mcl_coverage_v012',
-  dialogState:'mcl_dialog_state_v017'
+  dialogState:'mcl_dialog_state_v017',
+  minimoValidation:'mcl_minimo_validation_v023',
+  minimoValidationDraft:'mcl_minimo_validation_draft_v023'
 };
 const $=s=>document.querySelector(s);
 const load=(k,d)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}};
@@ -161,6 +252,183 @@ let dialogState=load(K.dialogState,{memoryCursorId:null,suppressWork:false,small
 if(typeof dialogState.suppressWork!=='boolean') dialogState.suppressWork=false;
 if(!Number.isFinite(dialogState.smalltalkTurns)) dialogState.smalltalkTurns=0;
 if(typeof dialogState.smalltalkTopic!=='string') dialogState.smalltalkTopic=null;
+
+
+// ---- Minimo秘書検証モード（Minimo本体とは完全分離） ----
+const MV_PERSONAS={mizuki:'橘 美月',rin:'黒川 凛',reika:'神崎 麗華'};
+const MV_EVAL_LABELS={natural:'自然',human_would_not_say:'人間なら言わない',same_topic:'同じ話',no_value:'今それを言う意味がない'};
+let minimoValidation=load(K.minimoValidation,{records:[],currentBatchId:null,currentScenarioKey:null});
+let minimoDraft=load(K.minimoValidationDraft,{});
+
+function mvLocalDateTimeValue(d=new Date()){
+  const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function mvBaseDate(hour=9,minute=0){
+  const d=new Date();d.setHours(hour,minute,0,0);return mvLocalDateTimeValue(d);
+}
+const MV_PRESETS=[
+  {key:'01',name:'1. 始業前',kind:'pre_start',dt:[8,20],workStatus:'通常勤務',currentTask:'',currentStart:'',currentEnd:'',nextPlan:'今日の最初の業務',nextPlanTime:'08:30',unplaced:30,completed:'',change:'始業前'},
+  {key:'02',name:'2. 始業直後',kind:'just_started',dt:[8,35],workStatus:'通常勤務',currentTask:'メール確認',currentStart:'08:30',currentEnd:'09:00',nextPlan:'資料確認',nextPlanTime:'09:00',unplaced:30,completed:'',change:'勤務を開始した'},
+  {key:'03',name:'3. 現在業務中',kind:'in_task',dt:[10,15],workStatus:'通常勤務',currentTask:'資料作成',currentStart:'09:30',currentEnd:'11:00',nextPlan:'打合せ準備',nextPlanTime:'11:15',unplaced:45,completed:'メール確認',change:'現在業務を継続中'},
+  {key:'04',name:'4. 現在業務切替直後',kind:'task_switched',dt:[11,5],workStatus:'通常勤務',currentTask:'アプリ改修',currentStart:'11:00',currentEnd:'12:00',nextPlan:'昼休憩',nextPlanTime:'12:00',unplaced:30,completed:'資料確認',change:'直前の業務が終わり、次の業務へ切り替わった'},
+  {key:'05',name:'5. 次予定30分前',kind:'next_30',dt:[13,30],workStatus:'通常勤務',currentTask:'資料確認',currentStart:'13:00',currentEnd:'13:50',nextPlan:'打合せ',nextPlanTime:'14:00',unplaced:45,completed:'メール確認\n資料作成',change:'次予定まで30分'},
+  {key:'06',name:'6. 次予定10分前',kind:'next_10',dt:[13,50],workStatus:'通常勤務',currentTask:'資料確認',currentStart:'13:00',currentEnd:'13:55',nextPlan:'打合せ',nextPlanTime:'14:00',unplaced:45,completed:'メール確認\n資料作成',change:'次予定まで10分'},
+  {key:'07',name:'7. 次予定5分前',kind:'next_5',dt:[13,55],workStatus:'通常勤務',currentTask:'資料確認',currentStart:'13:00',currentEnd:'13:57',nextPlan:'打合せ',nextPlanTime:'14:00',unplaced:45,completed:'メール確認\n資料作成',change:'次予定まで5分'},
+  {key:'08',name:'8. 1件完了直後',kind:'one_done',dt:[10,0],workStatus:'通常勤務',currentTask:'次の業務',currentStart:'10:05',currentEnd:'11:00',nextPlan:'',nextPlanTime:'',unplaced:60,completed:'資料確認',change:'一つ完了した'},
+  {key:'09',name:'9. 複数完了',kind:'multi_done',dt:[15,0],workStatus:'通常勤務',currentTask:'アプリ改修',currentStart:'14:30',currentEnd:'16:00',nextPlan:'',nextPlanTime:'',unplaced:30,completed:'メール確認\n資料作成\n確認作業',change:'複数の業務が完了した'},
+  {key:'10',name:'10. 未配置なし',kind:'unplaced_none',dt:[10,30],workStatus:'通常勤務',currentTask:'資料作成',currentStart:'10:00',currentEnd:'11:30',nextPlan:'確認作業',nextPlanTime:'13:00',unplaced:0,completed:'メール確認',change:'予定内に業務が収まっている'},
+  {key:'11',name:'11. 未配置少量',kind:'unplaced_small',dt:[14,0],workStatus:'通常勤務',currentTask:'資料確認',currentStart:'13:30',currentEnd:'14:30',nextPlan:'アプリ改修',nextPlanTime:'15:00',unplaced:30,completed:'メール確認',change:'少しだけ予定に入っていない業務がある'},
+  {key:'12',name:'12. 未配置大量',kind:'unplaced_large',dt:[14,0],workStatus:'通常勤務',currentTask:'資料確認',currentStart:'13:30',currentEnd:'14:30',nextPlan:'アプリ改修',nextPlanTime:'15:00',unplaced:180,completed:'メール確認',change:'予定に入りきらない業務が多い'},
+  {key:'13',name:'13. 予定が少ない',kind:'few_plans',dt:[13,0],workStatus:'通常勤務',currentTask:'資料確認',currentStart:'13:00',currentEnd:'14:00',nextPlan:'',nextPlanTime:'',unplaced:0,completed:'メール確認',change:'午後の予定に余裕がある'},
+  {key:'14',name:'14. 予定が多い',kind:'many_plans',dt:[10,0],workStatus:'通常勤務',currentTask:'資料作成',currentStart:'09:30',currentEnd:'10:30',nextPlan:'確認作業',nextPlanTime:'10:40',unplaced:90,completed:'メール確認',change:'予定が詰まっている'},
+  {key:'15',name:'15. 休日出勤',kind:'holiday_work',dt:[10,0],workStatus:'休日出勤',currentTask:'資料確認',currentStart:'10:00',currentEnd:'11:30',nextPlan:'',nextPlanTime:'',unplaced:60,completed:'',change:'休日出勤を開始した'},
+  {key:'16',name:'16. 休業日',kind:'day_off',dt:[10,0],workStatus:'休業',currentTask:'',currentStart:'',currentEnd:'',nextPlan:'',nextPlanTime:'',unplaced:0,completed:'',change:'今日は休業日'},
+  {key:'17',name:'17. 終業30分前',kind:'end_30',dt:[16,30],workStatus:'通常勤務',currentTask:'アプリ改修',currentStart:'15:30',currentEnd:'17:00',nextPlan:'',nextPlanTime:'',unplaced:45,completed:'メール確認\n資料作成',change:'終業まで30分'},
+  {key:'18',name:'18. 終業直後',kind:'just_ended',dt:[17,5],workStatus:'通常勤務',currentTask:'',currentStart:'',currentEnd:'',nextPlan:'',nextPlanTime:'',unplaced:30,completed:'メール確認\n資料作成',change:'勤務時間を過ぎた'},
+  {key:'19',name:'19. 終業2時間後',kind:'end_2h',dt:[19,0],workStatus:'通常勤務',currentTask:'アプリ改修',currentStart:'17:30',currentEnd:'19:30',nextPlan:'',nextPlanTime:'',unplaced:60,completed:'メール確認\n資料作成',change:'終業から2時間経過'},
+  {key:'20',name:'20. 前回から変化なし',kind:'no_change',dt:[14,30],workStatus:'通常勤務',currentTask:'資料作成',currentStart:'14:00',currentEnd:'15:30',nextPlan:'確認作業',nextPlanTime:'16:00',unplaced:45,completed:'メール確認',change:'前回から大きな変化なし'}
+];
+function mvPresetByKey(key){return MV_PRESETS.find(x=>x.key===key)||MV_PRESETS[0]}
+function mvApplyPresetObj(p){
+  $('#mvDateTime').value=mvBaseDate(p.dt[0],p.dt[1]);$('#mvWorkStatus').value=p.workStatus;
+  $('#mvCurrentTask').value=p.currentTask;$('#mvCurrentStart').value=p.currentStart;$('#mvCurrentEnd').value=p.currentEnd;
+  $('#mvNextPlan').value=p.nextPlan;$('#mvNextPlanTime').value=p.nextPlanTime;$('#mvUnplaced').value=p.unplaced;
+  $('#mvCompleted').value=p.completed;$('#mvChange').value=p.change;mvSaveDraft();
+}
+function mvReadForm(){
+  const p=mvPresetByKey($('#mvPreset').value);
+  return {presetKey:p.key,scenarioName:p.name,kind:p.kind,dateTime:$('#mvDateTime').value,workStatus:$('#mvWorkStatus').value,currentTask:$('#mvCurrentTask').value.trim(),currentStart:$('#mvCurrentStart').value,currentEnd:$('#mvCurrentEnd').value,nextPlan:$('#mvNextPlan').value.trim(),nextPlanTime:$('#mvNextPlanTime').value,unplacedMinutes:Number($('#mvUnplaced').value)||0,completedTasks:$('#mvCompleted').value.split(/\n+/).map(x=>x.trim()).filter(Boolean),change:$('#mvChange').value.trim()};
+}
+function mvSaveDraft(){minimoDraft={preset:$('#mvPreset').value,persona:$('#mvPersona').value,context:mvReadForm()};save(K.minimoValidationDraft,minimoDraft)}
+function mvMinutesUntil(time,dt){if(!time||!dt)return null;const d=new Date(dt);const [h,m]=time.split(':').map(Number);const t=new Date(d);t.setHours(h,m,0,0);return Math.round((t-d)/60000)}
+function mvBuildIntent(ctx){
+  const nextMin=mvMinutesUntil(ctx.nextPlanTime,ctx.dateTime);
+  const completeCount=ctx.completedTasks.length;
+  let type='current',value='現在の流れを自然に受け止める',recommendation='keep';
+  switch(ctx.kind){
+    case 'pre_start':type='start';value='始業前なので、先回りして働かせず入りやすさを作る';recommendation='ease_in';break;
+    case 'just_started':type='start';value='始業直後なので、最初の一歩を短く支える';recommendation='ease_in';break;
+    case 'in_task':type='current';value='今やっていることを邪魔せず、集中を保つ';recommendation='focus';break;
+    case 'task_switched':type='transition';value='一区切りを認め、次へ自然に切り替える';recommendation='transition';break;
+    case 'next_30':case 'next_10':case 'next_5':type='upcoming';value='次予定が近いので、今始めることを増やさない';recommendation=ctx.kind==='next_5'?'prepare_now':ctx.kind==='next_10'?'wrap_up':'prepare';break;
+    case 'one_done':case 'multi_done':type='progress';value='終わった事実を内部語ではなく一区切りとして受け取る';recommendation='acknowledge';break;
+    case 'unplaced_none':type='fit';value='予定が収まっている安心感だけを短く伝える';recommendation='steady';break;
+    case 'unplaced_small':type='unplaced';value='少量なので煽らず、順番を決めればよいと伝える';recommendation='prioritize_light';break;
+    case 'unplaced_large':type='overload';value='全部を抱えず、今日やる範囲を絞る価値がある';recommendation='prioritize';break;
+    case 'few_plans':type='light';value='余白を仕事で埋めず、落ち着いて進める価値がある';recommendation='steady';break;
+    case 'many_plans':type='busy';value='詰まりを読み上げず、目の前と次だけに絞る';recommendation='focus_next';break;
+    case 'holiday_work':type='holiday_work';value='休日出勤を責めず、通常日より範囲を絞る';recommendation='limit';break;
+    case 'day_off':type='rest';value='休業日は仕事を促さず、休むことを肯定する';recommendation='rest';break;
+    case 'end_30':type='finish';value='終業前なので、新しい仕事を増やさず締めに入る';recommendation='wrap_up';break;
+    case 'just_ended':type='finish';value='勤務時間終了を踏まえ、急ぎでないものを持ち越す';recommendation='stop';break;
+    case 'end_2h':type='overtime';value='長時間化しているので、続行より終了を優先する';recommendation='stop_strong';break;
+    case 'no_change':type='steady';value='変化なしを機械的に読み上げず、今の流れを保てる安心感を出す';recommendation='steady';break;
+  }
+  return {type,value,recommendation,nextMin,completeCount,subject:ctx.currentTask||ctx.nextPlan||'',ctx};
+}
+function mvFact(intent,persona,v){
+  const c=intent.ctx,task=c.currentTask||'今の作業',next=c.nextPlan||'次の予定',n=intent.nextMin;
+  const pick=(a)=>a[Math.abs(v)%a.length];
+  const polite=persona!=='reika';
+  switch(intent.type){
+    case 'start':return pick(c.kind==='pre_start'?[`まだ始業前ですね。`,`そろそろ一日が始まりますね。`,`始業までもう少しですね。`]:[`仕事が始まったところですね。`,`まずは一日の入り口ですね。`,`始業したばかりですね。`]);
+    case 'current':return pick([`${task}を進めているところですね。`,`今は${task}に集中する時間ですね。`,`いま手を付けているのは${task}ですね。`]);
+    case 'transition':return pick([`一つ区切って、${task}に移ったところですね。`,`さっきの作業が終わって、今は${task}ですね。`,`一区切りついて、次へ切り替わったところですね。`]);
+    case 'upcoming':return pick(n!==null&&n<=5?[`${next}までもう少しですね。`,`もうすぐ${next}ですね。`,`${next}がすぐそこまで来ていますね。`]:n!==null&&n<=10?[`${next}まであと少しですね。`,`そろそろ${next}を意識する時間ですね。`,`このあとすぐ${next}ですね。`]:[`このあとは${next}ですね。`,`少ししたら${next}ですね。`,`次は${next}ですね。`]);
+    case 'progress':return pick(intent.completeCount>1?[`今日はもういくつか片づいていますね。`,`いくつか一区切りつきましたね。`,`今日はちゃんと前に進んでいますね。`]:[`一つ終わったんですね。`,`まず一つ片づきましたね。`,`一件、区切りがつきましたね。`]);
+    case 'fit':return pick([`今日は予定の中にきれいに収まっていますね。`,`今のところ、予定どおりに進められそうですね。`,`今日は無理に詰め直さなくてもよさそうですね。`]);
+    case 'unplaced':return pick([`少しだけ予定に入りきっていないものがありますね。`,`まだ少しだけ行き先の決まっていない仕事がありますね。`,`予定に入っていない分が少し残っていますね。`]);
+    case 'overload':return pick([`今日は予定に入りきらない分がかなりありますね。`,`このまま全部を今日に載せるのは厳しそうですね。`,`今日は抱えている量が少し多そうですね。`]);
+    case 'light':return pick([`今日は少し余白がありますね。`,`予定には少しゆとりがありますね。`,`今日は詰め込みすぎずに進められそうですね。`]);
+    case 'busy':return pick([`今日は予定がかなり詰まっていますね。`,`今日は次々と予定が続きますね。`,`今日はゆっくり迷っている余裕は少なそうですね。`]);
+    case 'holiday_work':return pick([`今日は休日出勤なんですね。`,`お休みの日に仕事をしているんですね。`,`今日は通常の勤務日ではないんですね。`]);
+    case 'rest':return pick([`今日はお休みですね。`,`今日は仕事を入れない日ですね。`,`今日は休業日ですね。`]);
+    case 'finish':return pick(c.kind==='end_30'?[`そろそろ終業が見えてきましたね。`,`勤務時間も残りわずかですね。`,`今日は締めに入る時間ですね。`]:[`勤務時間はもう終わっていますね。`,`今日はもう終業時刻を過ぎていますね。`,`勤務時間は一区切りついていますね。`]);
+    case 'overtime':return pick([`もう終業からかなり時間が経っていますね。`,`今日はずいぶん長く続いていますね。`,`勤務時間をだいぶ越えていますね。`]);
+    case 'steady':return pick([`前回から大きくは変わっていませんね。`,`今のところ流れは大きく変わっていませんね。`,`状況はさっきからほぼ同じですね。`]);
+  }
+  return polite?'今の状況は把握できています。':'状況は見えているわ。';
+}
+function mvAction(intent,persona,v){
+  const c=intent.ctx,task=c.currentTask||'今の作業',next=c.nextPlan||'次の予定';
+  const pick=a=>a[Math.abs(v)%a.length];
+  const packs={
+    mizuki:{
+      ease_in:[`最初にやることだけ決めて、ゆっくり入りましょう。`,`焦って詰め込まず、まず一つから始めれば十分です。`,`今日の流れだけ確認して、落ち着いて始めましょう。`],
+      focus:[`${task}が終わるまでは、ほかを増やさなくてよさそうです。`,`今は目の前の${task}に絞って進めるのがよさそうです。`,`次を考えすぎず、まず今の作業を一区切りつけましょう。`],
+      transition:[`そのまま一つずつ切り替えていけばよさそうです。`,`一区切りできたので、今の作業に落ち着いて入りましょう。`,`前の仕事を引きずらず、今の一件に集中できそうです。`],
+      prepare:[`今の作業を広げすぎず、少し余裕を残しておくとよさそうです。`,`新しいことを増やさず、今の作業を区切るところまででよさそうです。`,`少しずつ${next}へ切り替える準備をしておきましょう。`],
+      wrap_up:[`新しい作業には手を広げず、今のところで区切るのがよさそうです。`,`そろそろ手を止めやすいところまでまとめておきましょう。`,`ここからは${next}に向けて切り替える方がよさそうです。`],
+      prepare_now:[`今は作業を増やさず、${next}の準備を優先しましょう。`,`もう切り替えて大丈夫です。${next}に向かう準備をしましょう。`,`この数分は${next}のために空けておくのがよさそうです。`],
+      acknowledge:[`きちんと進んでいます。次も一つずつで十分です。`,`一区切りできた分だけ、少し余裕ができましたね。`,`進んだことはちゃんと見えているので、このまま無理なく続けましょう。`],
+      steady:[`この流れを崩さず、そのまま進めればよさそうです。`,`無理に予定を動かさず、このまま進めて大丈夫そうです。`,`今は余計に手を加えず、落ち着いて続けましょう。`],
+      prioritize_light:[`まず優先度の高いものだけ、どこに入れるか決めれば十分です。`,`全部を気にせず、先に一件だけ順番を決めましょう。`,`少しだけなので、期限の近いものから置き場所を決めればよさそうです。`],
+      prioritize:[`全部を今日に押し込まず、期限と重要度で今日やる範囲を絞りましょう。`,`まず今日やるものを決めて、残りは別日に回すのがよさそうです。`,`抱えたままにせず、優先度の高いものだけ先に残しましょう。`],
+      focus_next:[`先の全部を考えず、今の作業と次の予定だけに絞りましょう。`,`一つずつ区切って、次の予定に遅れないことを優先しましょう。`,`今日は順番を増やさず、目の前から片づける方がよさそうです。`],
+      limit:[`せっかくの休日なので、今日やる範囲は絞っておきましょう。`,`全部を終わらせようとせず、必要なところだけで切り上げましょう。`,`休日出勤の日こそ、終わりどころを先に決めておくとよさそうです。`],
+      rest:[`仕事のことは勤務日に回して、今日はゆっくり過ごしましょう。`,`今日は休む日にして大丈夫です。`,`仕事を進める必要はありません。今日はしっかり休みましょう。`],
+      stop:[`急ぎでないものは明日に回して、今日はここまででよさそうです。`,`残っていても、今日中でなくていいものは明日に回しましょう。`,`ここから無理に増やさず、今日は終わりにしてよさそうです。`],
+      stop_strong:[`これ以上は効率も落ちやすいので、急ぎでなければ今日は終わりにしましょう。`,`もう十分長く続いています。残りは明日に回す方がよさそうです。`,`ここからは続けるより、区切って休むことを優先しましょう。`]
+    },
+    rin:{
+      ease_in:[`最初に着手する一件だけ決めれば十分です。`,`開始直後は順番を増やさず、一件に絞りましょう。`,`今日の流れを確認してから着手しましょう。`],focus:[`${task}を終えるまで対象を増やさない方が合理的です。`,`現時点では${task}に集中しましょう。`,`まず現在業務を一区切りつけるのが妥当です。`],transition:[`切替は完了しています。今の業務に集中しましょう。`,`前工程は終わっています。次の一件へ進めば十分です。`,`今は${task}に対象を絞りましょう。`],prepare:[`新規作業は増やさず、${next}へ移れる余白を残しましょう。`,`今の業務を広げず、次予定への切替を優先してください。`,`ここからは区切りやすさを優先しましょう。`],wrap_up:[`新しい作業は開始せず、現在業務を区切りましょう。`,`次予定を優先できる状態に移してください。`,`ここで作業を広げる必要はありません。`],prepare_now:[`作業を止めて、${next}の準備を優先しましょう。`,`次予定が直前です。切替を優先してください。`,`今は${next}への移行が最優先です。`],acknowledge:[`進捗は出ています。次も一件ずつ進めれば問題ありません。`,`一区切りついています。このまま順番どおりで十分です。`,`進んだ分は確保できています。次に対象を移しましょう。`],steady:[`現状を維持して進めれば問題ありません。`,`予定を動かす必要はありません。このまま進めましょう。`,`現在の流れを維持するのが妥当です。`],prioritize_light:[`期限と優先度で一件だけ配置先を決めましょう。`,`少量なので、高優先のものから順番を確定すれば十分です。`,`まず一件だけ予定へ入れれば整理できます。`],prioritize:[`今日行う範囲を絞り、残りは後日に回しましょう。`,`期限と重要度を基準に、今日処理する対象を限定してください。`,`全件を抱えず、優先度の高いものだけ残しましょう。`],focus_next:[`現在業務と次予定だけに対象を絞りましょう。`,`順番どおりに処理し、次予定への遅れを避けてください。`,`先の予定まで考えず、直近二件だけを見れば十分です。`],limit:[`休日出勤なので、処理範囲は必要最小限にしましょう。`,`通常勤務日と同じ量を抱える必要はありません。`,`今日行う範囲を先に限定するのが妥当です。`],rest:[`今日は休業日です。仕事を進める必要はありません。`,`勤務予定はありません。休むことを優先しましょう。`,`今日は業務対象外です。仕事は勤務日に回してください。`],stop:[`勤務時間は終了しています。急ぎでない業務は明日に回しましょう。`,`今日中である必要がないものは、ここで切り上げて問題ありません。`,`これ以上広げず、残りは次の勤務日に回すのが妥当です。`],stop_strong:[`長時間化しています。急ぎでなければ終了を優先してください。`,`これ以上の継続より、今日は切り上げる方が合理的です。`,`勤務時間を大きく超えています。残りは明日に回しましょう。`]
+    },
+    reika:{
+      ease_in:[`最初から全部抱える必要はないわ。一件だけ決めなさい。`,`始まったばかりよ。余計なことを増やさず、一つから片づけなさい。`,`まず今日の順番だけ決めればいい。朝から欲張らないことね。`],focus:[`今は${task}よ。ほかへ目移りする前に、そこを一区切りつけなさい。`,`手を広げる必要はないわ。まず${task}を終わらせなさい。`,`次々触るより、今の${task}を片づける方がましね。`],transition:[`一つ終わったなら引きずらない。今の${task}へ切り替えなさい。`,`前の仕事はもう終わり。いつまでも眺めず、次へ進みなさい。`,`区切りはついたわ。今は${task}だけ見ていればいい。`],prepare:[`今から仕事を増やす必要はないわ。${next}へ移れる余白を残しなさい。`,`次は${next}よ。ここで風呂敷を広げるのはやめなさい。`,`新しいことに手を出すより、${next}へ切り替えられる形にしておきなさい。`],wrap_up:[`もう広げる時間じゃないわ。今の作業を閉じて${next}へ備えなさい。`,`ここから新しい仕事を始める気？ やめなさい。次の予定が先よ。`,`そろそろ手を止める準備をしなさい。${next}を待たせるほど暇じゃないはずよ。`],prepare_now:[`もう${next}よ。作業は止めて準備しなさい。`,`まだ続ける気？ ${next}が先。今すぐ切り替えなさい。`,`この数分で新しいことは要らないわ。${next}へ向かいなさい。`],acknowledge:[`一つ片づいたわね。少なくとも前には進んでいる。`,`ちゃんと終わったものもあるじゃない。次も一件ずつでいいわ。`,`進んだ分は進んだ。それで十分。次へ行きなさい。`],steady:[`今は崩す理由がないわ。そのまま進めなさい。`,`予定をいじって仕事を増やす必要はないわ。今の流れで十分。`,`余計な調整は要らない。このまま進めればいいわ。`],prioritize_light:[`少し残っているわね。放っておいて消えないから、一件だけ順番を決めなさい。`,`全部を眺める必要はないわ。高優先の一件だけ予定に入れなさい。`,`迷うほどの量じゃない。期限の近いものから置き場所を決めなさい。`],prioritize:[`ずいぶん抱えたわね。全部を今日に押し込むのはやめて、期限と重要度で切りなさい。`,`その量を全部今日やる気？ 無理に詰めず、残すものを決めなさい。`,`予定からあふれているわ。まず今日やるものだけ選びなさい。`],focus_next:[`予定が詰まっているのに全部を見る必要はないわ。今と次だけに集中しなさい。`,`先まで心配しても予定は減らない。目の前から順番に片づけなさい。`,`忙しい日に迷っている時間はないわ。今の一件と次だけ見なさい。`],limit:[`休日まで全部差し出す必要はないわ。今日やる範囲を絞りなさい。`,`休日出勤だからって欲張らないことね。必要なところだけ終わらせなさい。`,`休みの日まで働いているんだから、せめて終わりどころくらい先に決めなさい。`],rest:[`今日は休業日。仕事の心配は勤務日に回しなさい。`,`今日は仕事をする日じゃないわ。予定を増やさず休みなさい。`,`休みまで仕事に渡す必要はない。今日は閉じておきなさい。`],stop:[`勤務時間は終わりよ。急ぎでないなら閉じなさい。`,`まだ続ける気？ 今日でなくていい仕事は明日に回しなさい。`,`もう終業後。残っているからといって全部抱える必要はないわ。`],stop_strong:[`まだ続けているの？ もう十分長いわ。急ぎでないなら終わりなさい。`,`残業を美徳扱いするほど暇じゃないはずよ。残りは明日に回しなさい。`,`ここまで来たら粘る方が非効率よ。今日は閉じなさい。`]
+    }
+  };
+  return pick((packs[persona]&&packs[persona][intent.recommendation])||packs[persona].steady);
+}
+function mvRenderComment(intent,persona,seed,used){
+  for(let i=0;i<24;i++){
+    const v=seed+i*7;
+    let fact=mvFact(intent,persona,v);
+    if(persona==='reika') fact=fact.replace(/そろそろ一日が始まりますね。$/,'そろそろ一日が始まるわね。').replace(/今日は次々と予定が続きますね。$/,'今日は次々と予定が続くわね。').replace(/なんですね。$/,'なのね。').replace(/ありますね。$/,'あるわね。').replace(/いますね。$/,'いるわね。').replace(/ですね。$/,'ね。');
+    const action=mvAction(intent,persona,v*5+1);
+    const style=(v%4+4)%4;
+    let text;
+    if(style===0) text=`${fact}${action}`;
+    else if(style===1) text=`${fact}${action}`;
+    else if(style===2) text=`${fact}${action}`;
+    else text=`${fact}${action}`;
+    text=text.replace(/\s+/g,' ').replace(/。 /g,'。').trim();
+    if(!used.has(text))return text;
+  }
+  // 固定文へ戻らず、意味を保った短いフォールバック
+  const c=intent.ctx;
+  const f=seed%5;
+  if(persona==='reika'){const a=[`今は${c.currentTask||c.nextPlan||'目の前の一件'}だけ見なさい。全部を一度に抱える必要はないわ。`,`順番を増やさないことね。${c.currentTask||c.nextPlan||'今の一件'}から片づけなさい。`,`全部を相手にするから散らかるのよ。まず一件に絞りなさい。`,`今やることだけ決めなさい。残りまで同時に抱える必要はないわ。`,`迷うなら一件だけ選びなさい。それで十分よ。`];return a[f];}
+  if(persona==='rin'){const a=[`${c.currentTask||c.nextPlan||'現在の一件'}に対象を絞りましょう。残りは順番に処理すれば問題ありません。`,`処理対象を一件に限定しましょう。残りは後から順番に確認できます。`,`現時点では一件ずつ処理するのが妥当です。`,`まず直近の一件を確定しましょう。それ以外は後で問題ありません。`,`対象を増やさず、今の一件から進めましょう。`];return a[f];}
+  {const a=[`${c.currentTask||c.nextPlan||'今の一件'}にいったん絞りましょう。全部を一度に考えなくても大丈夫です。`,`まず一つだけ決めて進めましょう。残りはそのあとで大丈夫です。`,`今やる一件だけに目を向ければ十分そうです。`,`全部を同時に抱えず、目の前から一つずつでよさそうです。`,`まず直近の一件を進めて、残りはあとで整理しましょう。`];return a[f];}
+}
+function mvGenerateRecords(ctx,persona,count,batchId){
+  const intent=mvBuildIntent(ctx);const used=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText));const out=[];
+  for(let i=0;i<count;i++){
+    const seed=(Number(ctx.presetKey)||1)*101+i*17+minimoValidation.records.length;
+    const finalText=mvRenderComment(intent,persona,seed,used);used.add(finalText);
+    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation}});
+  }
+  return out;
+}
+function mvPersist(){save(K.minimoValidation,minimoValidation)}
+function mvGenerate5(){mvSaveDraft();const ctx=mvReadForm(),persona=$('#mvPersona').value,batchId='single-'+Date.now();const recs=mvGenerateRecords(ctx,persona,5,batchId);minimoValidation.records.push(...recs);minimoValidation.currentBatchId=batchId;minimoValidation.currentScenarioKey=ctx.presetKey;mvPersist();mvRenderAll()}
+function mvGenerate100(){
+  if(!confirm('美月で20シナリオ×5コメント＝100件を新しい評価バッチとして生成します。\n過去の評価履歴は削除しません。'))return;
+  const batchId='mizuki100-'+Date.now();let all=[];
+  for(const p of MV_PRESETS){const ctx={presetKey:p.key,scenarioName:p.name,kind:p.kind,dateTime:mvBaseDate(p.dt[0],p.dt[1]),workStatus:p.workStatus,currentTask:p.currentTask,currentStart:p.currentStart,currentEnd:p.currentEnd,nextPlan:p.nextPlan,nextPlanTime:p.nextPlanTime,unplacedMinutes:p.unplaced,completedTasks:p.completed.split(/\n+/).filter(Boolean),change:p.change};all.push(...mvGenerateRecords(ctx,'mizuki',5,batchId))}
+  minimoValidation.records.push(...all);minimoValidation.currentBatchId=batchId;minimoValidation.currentScenarioKey='01';mvPersist();mvRenderAll();
+}
+function mvCurrentRecords(){const id=minimoValidation.currentBatchId;if(!id)return [];return minimoValidation.records.filter(r=>r.batchId===id)}
+function mvSetEval(id,type){const r=minimoValidation.records.find(x=>x.id===id);if(!r)return;r.evaluation=type;r.evaluatedAt=new Date().toISOString();mvPersist();mvRenderAll()}
+function mvSaveImprovement(id,text){const r=minimoValidation.records.find(x=>x.id===id);if(!r)return;r.improvedText=text.trim();r.improvedAt=new Date().toISOString();mvPersist();}
+function mvRenderSummary(){const recs=mvCurrentRecords(),evaluated=recs.filter(r=>r.evaluation),natural=recs.filter(r=>r.evaluation==='natural');const rate=evaluated.length?natural.length/evaluated.length*100:null;$('#mvEvaluated').textContent=evaluated.length;$('#mvNatural').textContent=natural.length;$('#mvRate').textContent=rate===null?'—':rate.toFixed(1)+'%';$('#mvProgressBar').style.width=(recs.length?Math.min(100,evaluated.length/recs.length*100):0)+'%';const t=$('#mvTarget');t.classList.toggle('good',evaluated.length>=100&&rate>=95);t.textContent=evaluated.length>=100?(rate>=95?'目標達成：自然率95%以上。':`100件評価済み。自然率${rate.toFixed(1)}%。95%まで改善対象を確認。`):`最初の目標：${recs.length||100}件を評価し、自然率95%以上。`;}
+function mvRenderFilter(){const sel=$('#mvScenarioFilter'),recs=mvCurrentRecords();const keys=[...new Set(recs.map(r=>r.scenario.presetKey))];sel.innerHTML='';if(!keys.length){const o=document.createElement('option');o.textContent='生成したコメントはありません';o.value='';sel.appendChild(o);return}for(const k of keys){const r=recs.find(x=>x.scenario.presetKey===k);const o=document.createElement('option');o.value=k;o.textContent=r.scenario.scenarioName;sel.appendChild(o)}if(!keys.includes(minimoValidation.currentScenarioKey))minimoValidation.currentScenarioKey=keys[0];sel.value=minimoValidation.currentScenarioKey;}
+function mvRenderResults(){const root=$('#mvResults');root.innerHTML='';const recs=mvCurrentRecords().filter(r=>!minimoValidation.currentScenarioKey||r.scenario.presetKey===minimoValidation.currentScenarioKey);if(!recs.length){root.innerHTML='<div class="val-card"><div class="val-sub">コメントを生成すると、ここに5件ずつ表示されます。</div></div>';return}for(const r of recs){const card=document.createElement('div');card.className='result-card';const h=document.createElement('div');h.className='result-head';h.innerHTML=`<span class="result-persona">${MV_PERSONAS[r.persona]}</span><span class="result-scenario">${r.scenario.scenarioName}</span>`;const tx=document.createElement('div');tx.className='result-text';tx.textContent=r.finalText;const ev=document.createElement('div');ev.className='result-eval';for(const [k,label] of Object.entries(MV_EVAL_LABELS)){const b=document.createElement('button');b.textContent=label;if(r.evaluation===k)b.className='selected '+(k==='natural'?'natural':'');b.onclick=()=>mvSetEval(r.id,k);ev.appendChild(b)}const imp=document.createElement('div');imp.className='result-improve';const ta=document.createElement('textarea');ta.placeholder='自分ならこう言う';ta.value=r.improvedText||'';const sb=document.createElement('button');sb.textContent='改善例を保存';sb.onclick=()=>{mvSaveImprovement(r.id,ta.value);sb.textContent='保存済み';setTimeout(()=>sb.textContent='改善例を保存',900)};imp.append(ta,sb);card.append(h,tx,ev,imp);root.appendChild(card)}}
+function mvRenderAll(){mvRenderFilter();mvRenderSummary();mvRenderResults()}
+function mvExport(){const data={app:'Mizuki Conversation Lab - Minimo秘書検証',version:VERSION,exportedAt:new Date().toISOString(),records:minimoValidation.records.map(r=>({scenario:r.scenario,persona:r.persona,finalText:r.finalText,evaluation:r.evaluation,improvedText:r.improvedText||null,datetime:r.at,labLogic:r.labLogic}))};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='minimo_secretary_validation_'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
+function mvClear(){if(!confirm('Minimo秘書検証の評価履歴だけを削除しますか？\n会話Labの履歴・Memoryは削除しません。'))return;minimoValidation={records:[],currentBatchId:null,currentScenarioKey:null};mvPersist();mvRenderAll()}
+function setLabMode(mode){const validation=mode==='validation';$('#conversationModeBtn').classList.toggle('active',!validation);$('#minimoModeBtn').classList.toggle('active',validation);$('#conversationScenario').style.display=validation?'none':'';$('#chat').style.display=validation?'none':'';$('#conversationComposer').style.display=validation?'none':'';$('#minimoValidationPanel').classList.toggle('show',validation);$('#identityName').textContent=validation?'Minimo秘書検証':'橘 美月';$('#identityMeta').innerHTML=validation?'人間らしさ評価 · Lab専用':'<span id="expressionLabel">normal</span> · Mizuki Conversation Lab';if(!validation){const last=[...history].reverse().find(x=>x.speaker==='mizuki');if(last)updateExpression(last.expression)}else mvRenderAll()}
 
 function smalltalkActive(){
   return !!dialogState.suppressWork && (dialogState.smalltalkTurns||0)>0;
@@ -1134,6 +1402,7 @@ function exportJSON(){
     evaluations,
     conversationHistory:history,
     longMemory,
+    minimoValidationSummary:{recordCount:minimoValidation.records.length},
     coverageSummary:{pairCount:Object.keys(coverage.pairs).length,scenarioCount:coverage.usedScenarios.length}
   };
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
@@ -1181,6 +1450,17 @@ $('#manualScenarioBtn').onclick=manualScenario;
 document.querySelectorAll('[data-clear]').forEach(b=>b.onclick=()=>clearType(b.dataset.clear));
 $('#callName').value=settings.callName||'';
 $('#debugToggle').checked=!!settings.debug;
+
+// Minimo秘書検証UI初期化
+for(const p of MV_PRESETS){const o=document.createElement('option');o.value=p.key;o.textContent=p.name;$('#mvPreset').appendChild(o)}
+$('#mvPreset').value=minimoDraft.preset||'01';$('#mvPersona').value=minimoDraft.persona||'mizuki';
+if(minimoDraft.context){const c=minimoDraft.context;$('#mvDateTime').value=c.dateTime||mvBaseDate(8,20);$('#mvWorkStatus').value=c.workStatus||'通常勤務';$('#mvCurrentTask').value=c.currentTask||'';$('#mvCurrentStart').value=c.currentStart||'';$('#mvCurrentEnd').value=c.currentEnd||'';$('#mvNextPlan').value=c.nextPlan||'';$('#mvNextPlanTime').value=c.nextPlanTime||'';$('#mvUnplaced').value=c.unplacedMinutes||0;$('#mvCompleted').value=(c.completedTasks||[]).join('\n');$('#mvChange').value=c.change||'';}else mvApplyPresetObj(mvPresetByKey($('#mvPreset').value));
+$('#conversationModeBtn').onclick=()=>setLabMode('conversation');$('#minimoModeBtn').onclick=()=>setLabMode('validation');
+$('#mvApplyPreset').onclick=()=>mvApplyPresetObj(mvPresetByKey($('#mvPreset').value));$('#mvPreset').onchange=()=>mvApplyPresetObj(mvPresetByKey($('#mvPreset').value));
+$('#mvGenerate5').onclick=mvGenerate5;$('#mvGenerate100').onclick=mvGenerate100;$('#mvExport').onclick=mvExport;$('#mvClear').onclick=mvClear;
+$('#mvScenarioFilter').onchange=()=>{minimoValidation.currentScenarioKey=$('#mvScenarioFilter').value;mvPersist();mvRenderResults()};
+['mvPersona','mvDateTime','mvWorkStatus','mvCurrentTask','mvCurrentStart','mvCurrentEnd','mvNextPlan','mvNextPlanTime','mvUnplaced','mvCompleted','mvChange'].forEach(id=>$('#'+id).addEventListener('change',mvSaveDraft));
+mvRenderAll();
 
 chips();renderHistory();
 const last=[...history].reverse().find(x=>x.speaker==='mizuki');if(last)updateExpression(last.expression);
