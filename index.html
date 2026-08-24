@@ -225,7 +225,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.2.4.2-stage9-holidaywork-attention-interpretation-intent-fix-human-natural';
+const VERSION='0.2.4.2-stage10-interpretation-family-holidaywork-human-natural';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -491,7 +491,12 @@ function mvMizukiDailyFrequencyGroup(meaning,speechKind){
   if(/^SMALLTALK_(MONTH_|LATE_MONTH|YEAR_END)/.test(m))return 'DAILY_SMALLTALK_CALENDAR_PHASE';
   if(/^SMALLTALK_SEASON_/.test(m))return 'DAILY_SMALLTALK_SEASON';
   if(/^SMALLTALK_DAYPART_/.test(m))return `DAILY_${m}`;
-  if(['HOLIDAY_WORK_STATE','HOLIDAY_WORK_APPRECIATION','HOLIDAY_WORK_ACK'].includes(m))return 'DAILY_HOLIDAY_WORK_CONTEXT';
+  // Stage10: 休日出勤はAttention全体ではなくInterpretation Family単位で日次頻度を管理する。
+  if(m==='HOLIDAY_WORK_STATE')return 'DAILY_HOLIDAY_WORK_STATE';
+  if(m==='HOLIDAY_WORK_APPRECIATION')return 'DAILY_HOLIDAY_WORK_APPRECIATION';
+  if(m==='HOLIDAY_WORK_ACK')return 'DAILY_HOLIDAY_WORK_CONTRAST';
+  if(m==='HOLIDAY_WORK_CURRENT_TASK')return 'DAILY_HOLIDAY_WORK_CURRENT_TASK_CONTEXT';
+  if(m==='HOLIDAY_WORK_CARE')return 'DAILY_HOLIDAY_WORK_CARE';
   if(['AFTER_HOLIDAY_CARE','LONG_OVERTIME_TREND_ACK','EARLY_START_CARE','END_OF_WORK_APPRECIATION','BUSY_DAY_ACK','LONG_OVERTIME_APPRECIATION','MULTIPLE_COMPLETED_APPRECIATION'].includes(m))return `DAILY_${m}`;
   return null;
 }
@@ -557,7 +562,7 @@ function mvMizukiCandidateAttention(intent,cand){
   if(k.startsWith('change_'))return 'STATE_CHANGE';
   if(/^SMALLTALK_/.test(m)||cand.speechKind==='smalltalk')return 'SMALL_TALK';
   if(['LONG_OVERTIME_STATE','LONG_OVERTIME_CARE','LONG_OVERTIME_APPRECIATION'].includes(m)||k==='overtime'||k==='overtime_care'||k==='overtime_appreciation')return 'LONG_WORK_AFTER_END';
-  if(['HOLIDAY_WORK_STATE','HOLIDAY_WORK_APPRECIATION','HOLIDAY_WORK_ACK'].includes(m)||k.startsWith('holiday_work'))return 'HOLIDAY_WORK';
+  if(['HOLIDAY_WORK_STATE','HOLIDAY_WORK_APPRECIATION','HOLIDAY_WORK_ACK','HOLIDAY_WORK_CURRENT_TASK','HOLIDAY_WORK_CARE'].includes(m)||k.startsWith('holiday_work'))return 'HOLIDAY_WORK';
   if(['WORKDAY_ENDED','END_OF_WORK_APPRECIATION'].includes(m)||k==='just_ended'||k==='just_ended_appreciation')return 'WORKDAY_END';
   if(['MULTIPLE_COMPLETED_ACK','MULTIPLE_COMPLETED_APPRECIATION','COMPLETED_TASK','MAJOR_TASK_COMPLETED_APPRECIATION','COMPLETION_ADVANCES_SCHEDULE'].includes(m)||k.startsWith('completed_')||k.startsWith('multi_completed'))return 'COMPLETED_PROGRESS';
   if(['PRE_START_STATE','SCHEDULE_NOT_STARTED'].includes(m))return 'PRE_WORK_CONTEXT';
@@ -575,6 +580,8 @@ function mvMizukiInterpretation(intent,cand,attention){
   if(attention==='HOLIDAY_WORK'){
     if(m==='HOLIDAY_WORK_APPRECIATION')return 'DAY_OFF_WORK_WORTH_APPRECIATION';
     if(m==='HOLIDAY_WORK_ACK')return 'NON_STANDARD_WORKDAY';
+    if(m==='HOLIDAY_WORK_CURRENT_TASK')return 'DAY_OFF_WORK_WITH_CURRENT_TASK';
+    if(m==='HOLIDAY_WORK_CARE')return 'DAY_OFF_WORK_GENTLE_ACKNOWLEDGEMENT';
     return 'WORKING_ON_DAY_OFF';
   }
   if(attention==='WORKDAY_END')return 'WORKDAY_REACHED_END';
@@ -612,6 +619,23 @@ function mvMizukiInterpretation(intent,cand,attention){
   if(attention==='STATE_CONTINUITY')return 'STATE_IS_CONTINUING';
   return cand.semanticMeaning||'CURRENT_CONTEXT';
 }
+// ---- 2026-08-24 Stage10: Interpretation Family（まず休日出勤のみ） ----
+// 同じHOLIDAY_WORK Attentionを「一括消費」せず、意味の異なる受け取り方だけを別Familyとして管理する。
+function mvMizukiInterpretationFamily(intent,cand,attention){
+  if(cand&&cand.interpretationFamily)return cand.interpretationFamily;
+  const m=String((cand&&cand.semanticMeaning)||''),k=String((cand&&cand.key)||'');
+  // 休日出勤で単独CURRENT_TASKを話す場合も、休日文脈付きCURRENT_TASKと同じFamily。
+  // 同じ「今の仕事」意味を二度消費しない。
+  if(intent&&intent.ctx&&intent.ctx.kind==='holiday_work'&&k==='current_task')return 'CURRENT_TASK_CONTEXT';
+  if(intent&&intent.ctx&&intent.ctx.kind==='holiday_work'&&attention==='HOLIDAY_WORK'){
+    if(m==='HOLIDAY_WORK_APPRECIATION')return 'APPRECIATION';
+    if(m==='HOLIDAY_WORK_ACK')return 'CONTRAST';
+    if(m==='HOLIDAY_WORK_CURRENT_TASK')return 'CURRENT_TASK_CONTEXT';
+    if(m==='HOLIDAY_WORK_CARE')return 'CARE';
+    return 'STATE_ACKNOWLEDGEMENT';
+  }
+  return null;
+}
 function mvMizukiHumanLayer(intent,cand){
   const attention=mvMizukiCandidateAttention(intent,cand),plan=mvMizukiAttentionPlan(intent),kind=intent.ctx.kind;
   let attentionScore=0,suppress=false;
@@ -622,7 +646,7 @@ function mvMizukiHumanLayer(intent,cand){
   // 「知っているが今は言わない」：終業後／休業日は未配置を口にしない。
   if(['just_ended','end_2h','day_off'].includes(kind)&&attention==='UNPLACED_WORKLOAD')suppress=true;
   if(kind==='holiday_work'&&attention==='UNPLACED_WORKLOAD')suppress=true;
-  return {attention,interpretation:mvMizukiInterpretation(intent,cand,attention),intent:mvMizukiSpeechIntent(cand),attentionScore,suppress};
+  return {attention,interpretation:mvMizukiInterpretation(intent,cand,attention),interpretationFamily:mvMizukiInterpretationFamily(intent,cand,attention),intent:mvMizukiSpeechIntent(cand),attentionScore,suppress};
 }
 function mvMizukiWouldHumanSayThisNow(intent,cand,layer){
   if(layer&&layer.suppress)return false;
@@ -775,7 +799,8 @@ function mvMizukiValidationCandidates(intent){
     const semanticMeaning=meta.semanticMeaning||key;
     const semanticAngle=meta.semanticAngle||semanticMeaning;
     const utteranceValue=Number.isFinite(meta.utteranceValue)?meta.utteranceValue:0;
-    keys.add(key);items.push({key,variants:arr,speechKind,semanticMeaning,semanticAngle,utteranceValue});
+    const interpretationFamily=meta.interpretationFamily||null;
+    keys.add(key);items.push({key,variants:arr,speechKind,semanticMeaning,semanticAngle,utteranceValue,interpretationFamily});
   };
   const current=c.currentTask, next=c.nextPlan, completed=c.completedTasks||[];
   const completedOne=completed.length?completed[completed.length-1]:'';
@@ -890,9 +915,11 @@ function mvMizukiValidationCandidates(intent){
       add('many_plans_advice',[`予定が続いているので、今の作業を広げすぎない方がよさそうです。`,`今日は予定が詰まっているので、次の予定に移りやすいところで区切るのがよさそうです。`],'advice');
       break;
     case 'holiday_work':
-      add('holiday_work',[`今日は休日出勤なんですね。`,`お休みの日に勤務しているんですね。`],'observation',{semanticMeaning:'HOLIDAY_WORK_STATE',semanticAngle:'WORK_STATUS',utteranceValue:31});
-      add('holiday_work_appreciation',[`今日は休日出勤なんですね。お疲れさまです。`,`お休みの日の勤務なんですね。お疲れさまです。`],'appreciation',{semanticMeaning:'HOLIDAY_WORK_APPRECIATION',semanticAngle:'APPRECIATION',utteranceValue:30});
-      add('holiday_work_difference',[`今日はいつもの勤務日とは少し違いますね。`],'care',{semanticMeaning:'HOLIDAY_WORK_ACK',semanticAngle:'WORKDAY_DIFFERENCE',utteranceValue:24});
+      add('holiday_work',[`今日は休日出勤なんですね。`,`お休みの日に勤務しているんですね。`],'observation',{semanticMeaning:'HOLIDAY_WORK_STATE',semanticAngle:'WORK_STATUS',interpretationFamily:'STATE_ACKNOWLEDGEMENT',utteranceValue:25});
+      add('holiday_work_appreciation',[`今日は休日出勤なんですね。お疲れさまです。`,`お休みの日の勤務なんですね。お疲れさまです。`],'appreciation',{semanticMeaning:'HOLIDAY_WORK_APPRECIATION',semanticAngle:'APPRECIATION',interpretationFamily:'APPRECIATION',utteranceValue:32});
+      if(current)add('holiday_work_current_context',[`お休みの日の勤務で、今は${current}なんですね。`,`休日出勤で、今は${current}をしているんですね。`],'observation',{semanticMeaning:'HOLIDAY_WORK_CURRENT_TASK',semanticAngle:'WORKDAY_CURRENT_TASK_RELATION',interpretationFamily:'CURRENT_TASK_CONTEXT',utteranceValue:29});
+      add('holiday_work_difference',[`今日はいつもの勤務日とは少し違いますね。`],'care',{semanticMeaning:'HOLIDAY_WORK_ACK',semanticAngle:'WORKDAY_DIFFERENCE',interpretationFamily:'CONTRAST',utteranceValue:27});
+      add('holiday_work_care',[current?`お休みの日にも${current}を進めているんですね。`:`お休みの日にも進めているんですね。`],'care',{semanticMeaning:'HOLIDAY_WORK_CARE',semanticAngle:'CARE_WORKDAY_CONTEXT',interpretationFamily:'CARE',utteranceValue:23});
       if(current)add('current_task',[`今は${current}なんですね。`]);
       if(c.unplacedMinutes>0)add('unplaced_observation',[unplacedText]);
       if(completedOne)add('completed_specific',[`${completedOne}はもう終わったんですね。`],'acknowledgement',{semanticMeaning:'COMPLETED_TASK',semanticAngle:'COMPLETION_REACTION',utteranceValue:18});
@@ -1006,7 +1033,7 @@ function mvMizukiScenarioRelevance(intent,cand){
     return Object.prototype.hasOwnProperty.call(w,key)?w[key]:0;
   }
   if(kind==='holiday_work'){
-    const w={holiday_work:38,holiday_work_appreciation:42,holiday_work_difference:28,current_task:16,unplaced_observation:4,holiday_work_advice:-42};
+    const w={holiday_work:28,holiday_work_appreciation:44,holiday_work_current_context:40,holiday_work_difference:36,holiday_work_care:32,current_task:18,unplaced_observation:4,holiday_work_advice:-42};
     return Object.prototype.hasOwnProperty.call(w,key)?w[key]:0;
   }
   if(kind==='many_plans'){
@@ -1027,7 +1054,7 @@ function mvMizukiScenarioRelevance(intent,cand){
   }
   return 0;
 }
-function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,humanLayer=null){
+function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,humanLayer=null){
   // Stage9: FACTの前に Attention → Interpretation → Intent を評価し、既存candidate rankingへ最小統合する。
   const layer=humanLayer||mvMizukiHumanLayer(intent,cand);
   let score=100-index*2+(cand.utteranceValue||0)+mvMizukiScenarioRelevance(intent,cand)+(layer.attentionScore||0);
@@ -1037,14 +1064,13 @@ function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic
   if(layer.intent==='CONNECT')score-=10;
   if(layer.intent==='SMALL_TALK')score-=14;              // scenario FACT > CARE > Small Talk > exhaustion
   if(layer.intent==='ADVISE')score-=54;                  // Adviceは引き続き最下位
-  // Holiday-work Primary Attention should lead, but not monopolize all five comments.
-  // After one holiday-context utterance, let CURRENT_WORK / Small Talk compete naturally.
-  if(intent.ctx.kind==='holiday_work'&&layer.attention==='HOLIDAY_WORK'){
-    const holidayAttentionUseCount=[...usedTopics].filter(k=>/^holiday_work(?:_|$)/.test(String(k))).length;
-    if(holidayAttentionUseCount)score-=48*holidayAttentionUseCount;
-    // After appreciation, prefer a different interpretation (non-standard workday) over
-    // repeating the same "working on a day off" observation in another wording.
-    if(usedMeanings.has('HOLIDAY_WORK_APPRECIATION')&&cand.semanticMeaning==='HOLIDAY_WORK_STATE')score-=20;
+  // Stage10: HOLIDAY_WORK Attention全体を消費しない。
+  // 同じInterpretation Familyだけを強く下げ、別Familyは高価値候補として残す。
+  if(intent.ctx.kind==='holiday_work'&&layer.interpretationFamily){
+    if(usedInterpretationFamilies&&usedInterpretationFamilies.has(layer.interpretationFamily))score-=90;
+    // APPRECIATIONの直後に単純なHOLIDAY_WORK_STATE言い換えへ戻るより、
+    // CURRENT_TASK_CONTEXT / CONTRAST / CAREを優先する。
+    if(usedMeanings.has('HOLIDAY_WORK_APPRECIATION')&&cand.semanticMeaning==='HOLIDAY_WORK_STATE')score-=58;
   }
   if(cand.speechKind==='noNewInformation')score-=70;     // 通常candidateとしては採用しない
   if(cand.key.startsWith('generic_'))score-=48;
@@ -1073,7 +1099,7 @@ function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic
   if(lastTopic===cand.key)score-=3;
   return score;
 }
-function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGroups,dailyGroups,humanLayer=null){
+function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGroups,dailyGroups,usedInterpretationFamilies,humanLayer=null){
   // Stage9: 「知っているが今は言わない」をAttention/Intent層で判定してから既存価値判定へ進む。
   const layer=humanLayer||mvMizukiHumanLayer(intent,cand);
   if(!mvMizukiWouldHumanSayThisNow(intent,cand,layer))return false;
@@ -1084,6 +1110,12 @@ function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGro
   const relevance=mvMizukiScenarioRelevance(intent,cand);
   if(relevance<=-20)return false;                         // 低関連topicへ逃げない
   if(usedMeanings.has(cand.semanticMeaning))return false; // 同じ意味の言い換え連発はしない
+  // 休日出勤の単純STATEは、APPRECIATION/CONTRAST/CURRENT_TASK_CONTEXT/CAREの
+  // いずれかで既に休日出勤を受け取った後は価値が低い。Small Talk等へ譲る。
+  if(intent.ctx.kind==='holiday_work'&&cand.semanticMeaning==='HOLIDAY_WORK_STATE'&&usedInterpretationFamilies&&usedInterpretationFamilies.size>0)return false;
+  // Stage10: 休日出勤はAttention全体ではなくFamily単位で消費する。
+  // 同一Familyの言い換えは再利用しないが、別Familyは残す。
+  if(intent.ctx.kind==='holiday_work'&&layer.interpretationFamily&&usedInterpretationFamilies&&usedInterpretationFamilies.has(layer.interpretationFamily))return false;
 
   const dailyGroup=mvMizukiDailyFrequencyGroup(cand.semanticMeaning,cand.speechKind);
   // Stage9 holiday-work fix: daily frequency is a soft preference for the scenario's Primary Attention.
@@ -1099,11 +1131,11 @@ function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGro
   if(cand.speechKind==='continuity')return score>=50;
   return score>=45;
 }
-function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,historicalUsed){
+function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,historicalUsed){
   const candidates=mvMizukiValidationCandidates(intent);
   const ordered=candidates.map((cand,index)=>{
     const humanLayer=mvMizukiHumanLayer(intent,cand);
-    return {cand,index,humanLayer,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,humanLayer)};
+    return {cand,index,humanLayer,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,humanLayer)};
   }).sort((a,b)=>b.score-a.score||a.index-b.index);
 
   // Stage8: 候補の価値順位を最優先する。
@@ -1111,7 +1143,7 @@ function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMean
   // 低価値なSmall Talk/枯渇へ逃げるために、高価値FACTを過去履歴だけで捨てない。
   for(const entry of ordered){
     const cand=entry.cand,layer=entry.humanLayer;
-    if(!mvMizukiCandidateHasNewHighValue(intent,cand,entry.score,usedMeanings,usedGroups,dailyGroups,layer))continue;
+    if(!mvMizukiCandidateHasNewHighValue(intent,cand,entry.score,usedMeanings,usedGroups,dailyGroups,usedInterpretationFamilies,layer))continue;
     const start=((seed%cand.variants.length)+cand.variants.length)%cand.variants.length;
     const textPasses=[
       text=>!historicalUsed||!historicalUsed.has(text),
@@ -1121,7 +1153,7 @@ function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMean
       for(let j=0;j<cand.variants.length;j++){
         const text=cand.variants[(start+j)%cand.variants.length].replace(/\s+/g,' ').replace(/。 /g,'。').trim();
         if(/(今日は暑|今日は寒|雨ですね|雪ですね|台風|疲れています|集中でき|やる気が出)/.test(text))continue;
-        if(text&&!used.has(text)&&textPass(text))return {text,topic:cand.key,speechKind:cand.speechKind,semanticMeaning:cand.semanticMeaning,semanticAngle:cand.semanticAngle,attention:layer.attention,interpretation:layer.interpretation,intentType:layer.intent,exhausted:false};
+        if(text&&!used.has(text)&&textPass(text))return {text,topic:cand.key,speechKind:cand.speechKind,semanticMeaning:cand.semanticMeaning,semanticAngle:cand.semanticAngle,attention:layer.attention,interpretationFamily:layer.interpretationFamily||null,interpretation:layer.interpretation,intentType:layer.intent,exhausted:false};
       }
     }
   }
@@ -1161,7 +1193,7 @@ function mvGenerateRecords(ctx,persona,count,batchId){
   // Small Talk → exhaustion へ早期移行していた。
   const historicalUsed=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText).filter(Boolean));
   const used=persona==='mizuki'?new Set():new Set(historicalUsed); // 美月だけbatch内hard guard。凛・麗華の既存重複防止は変更しない。
-  const out=[];const usedTopics=new Set(),usedMeanings=new Set(),usedAngles=new Set(),usedGroups=new Set(),usedInterpretations=new Set();let lastTopic=null,lastMeaning=null,lastInterpretation=null;
+  const out=[];const usedTopics=new Set(),usedMeanings=new Set(),usedAngles=new Set(),usedGroups=new Set(),usedInterpretations=new Set(),usedInterpretationFamilies=new Set();let lastTopic=null,lastMeaning=null,lastInterpretation=null;
   let exhaustionStateKey=null;const dailyGroups=new Set();
   if(persona==='mizuki'){
     // stateKey / continuity / daily frequencyは既存履歴を参照してよいが、
@@ -1171,17 +1203,17 @@ function mvGenerateRecords(ctx,persona,count,batchId){
   }
   for(let i=0;i<count;i++){
     const seed=(Number(ctx.presetKey)||1)*101+i*17+minimoValidation.records.length;
-    let finalText,semanticFocus=null,speechKind=null,semanticMeaning=null,semanticAngle=null,attention=null,interpretation=null,intentType=null,exhaustionGroup=null,exhausted=false;
+    let finalText,semanticFocus=null,speechKind=null,semanticMeaning=null,semanticAngle=null,attention=null,interpretationFamily=null,interpretation=null,intentType=null,exhaustionGroup=null,exhausted=false;
     if(persona==='mizuki'){
-      let rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,historicalUsed);
+      let rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,historicalUsed);
       // 最終表示文の絶対guard。同一batchで一致した場合は別seedで再選択する。
       for(let retry=0;retry<8&&rendered&&used.has(rendered.text);retry++){
-        rendered=mvRenderMizukiValidation(intent,seed+(retry+1)*997,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,historicalUsed);
+        rendered=mvRenderMizukiValidation(intent,seed+(retry+1)*997,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,historicalUsed);
       }
-      finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;attention=rendered.attention||null;interpretation=rendered.interpretation||null;intentType=rendered.intentType||null;exhausted=!!rendered.exhausted;
+      finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;attention=rendered.attention||null;interpretationFamily=rendered.interpretationFamily||null;interpretation=rendered.interpretation||null;intentType=rendered.intentType||null;exhausted=!!rendered.exhausted;
       exhaustionGroup=exhausted?`CONVERSATION_EXHAUSTION:${semanticMeaning}`:mvMizukiSemanticGroup(intent,semanticMeaning,semanticAngle);
       usedTopics.add(rendered.topic);lastTopic=rendered.topic;lastMeaning=semanticMeaning;lastInterpretation=interpretation;
-      usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);if(interpretation)usedInterpretations.add(interpretation);
+      usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);if(interpretation)usedInterpretations.add(interpretation);if(interpretationFamily)usedInterpretationFamilies.add(interpretationFamily);
       if(!exhausted){
         usedGroups.add(exhaustionGroup);
         const dg=mvMizukiDailyFrequencyGroup(semanticMeaning,speechKind);if(dg)dailyGroups.add(dg);
@@ -1189,7 +1221,7 @@ function mvGenerateRecords(ctx,persona,count,batchId){
     }else finalText=mvRenderComment(intent,persona,seed,used);
     // 凛・麗華の既存経路は変更せず、共通のbatch内最終表示重複guardだけ維持。
     used.add(finalText);
-    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,attention,interpretation,intentType,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'stage9-attention-interpretation-intent':null}});
+    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,attention,interpretationFamily,interpretation,intentType,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'stage10-interpretation-family-holidaywork':null}});
   }
   return out;
 }
