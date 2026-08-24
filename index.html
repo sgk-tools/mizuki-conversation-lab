@@ -225,7 +225,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.2.4.2-stage9-attention-interpretation-intent-human-natural';
+const VERSION='0.2.4.2-stage9-holidaywork-attention-interpretation-intent-fix-human-natural';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -572,7 +572,11 @@ function mvMizukiInterpretation(intent,cand,attention){
   const m=String(cand.semanticMeaning||'');
   if(attention==='STATE_CHANGE')return 'STATE_CHANGED_SINCE_LAST_CALL';
   if(attention==='LONG_WORK_AFTER_END')return m==='LONG_OVERTIME_APPRECIATION'?'LONG_WORK_WORTH_APPRECIATION':'LONG_WORKDAY';
-  if(attention==='HOLIDAY_WORK')return 'WORKING_ON_DAY_OFF';
+  if(attention==='HOLIDAY_WORK'){
+    if(m==='HOLIDAY_WORK_APPRECIATION')return 'DAY_OFF_WORK_WORTH_APPRECIATION';
+    if(m==='HOLIDAY_WORK_ACK')return 'NON_STANDARD_WORKDAY';
+    return 'WORKING_ON_DAY_OFF';
+  }
   if(attention==='WORKDAY_END')return 'WORKDAY_REACHED_END';
   if(attention==='COMPLETED_PROGRESS'){
     if(m==='MULTIPLE_COMPLETED_APPRECIATION')return 'PROGRESS_WORTH_APPRECIATION';
@@ -1033,6 +1037,15 @@ function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic
   if(layer.intent==='CONNECT')score-=10;
   if(layer.intent==='SMALL_TALK')score-=14;              // scenario FACT > CARE > Small Talk > exhaustion
   if(layer.intent==='ADVISE')score-=54;                  // Adviceは引き続き最下位
+  // Holiday-work Primary Attention should lead, but not monopolize all five comments.
+  // After one holiday-context utterance, let CURRENT_WORK / Small Talk compete naturally.
+  if(intent.ctx.kind==='holiday_work'&&layer.attention==='HOLIDAY_WORK'){
+    const holidayAttentionUseCount=[...usedTopics].filter(k=>/^holiday_work(?:_|$)/.test(String(k))).length;
+    if(holidayAttentionUseCount)score-=48*holidayAttentionUseCount;
+    // After appreciation, prefer a different interpretation (non-standard workday) over
+    // repeating the same "working on a day off" observation in another wording.
+    if(usedMeanings.has('HOLIDAY_WORK_APPRECIATION')&&cand.semanticMeaning==='HOLIDAY_WORK_STATE')score-=20;
+  }
   if(cand.speechKind==='noNewInformation')score-=70;     // 通常candidateとしては採用しない
   if(cand.key.startsWith('generic_'))score-=48;
 
@@ -1050,7 +1063,12 @@ function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic
   if(usedGroups&&usedGroups.has(group))score-=strictMeaning?16:10;
 
   const dailyGroup=mvMizukiDailyFrequencyGroup(cand.semanticMeaning,cand.speechKind);
-  if(dailyGroup&&dailyGroups&&dailyGroups.has(dailyGroup))score-=120;
+  if(dailyGroup&&dailyGroups&&dailyGroups.has(dailyGroup)){
+    // Holiday-work is the scenario-defining Primary Attention. Prior same-day validation history
+    // may lower repetition preference, but must not push the whole holiday context below unrelated facts.
+    const primaryHoliday=intent.ctx.kind==='holiday_work'&&layer.attention==='HOLIDAY_WORK';
+    score-=primaryHoliday?35:120;
+  }
   if(usedTopics.has(cand.key))score-=4;
   if(lastTopic===cand.key)score-=3;
   return score;
@@ -1068,7 +1086,12 @@ function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGro
   if(usedMeanings.has(cand.semanticMeaning))return false; // 同じ意味の言い換え連発はしない
 
   const dailyGroup=mvMizukiDailyFrequencyGroup(cand.semanticMeaning,cand.speechKind);
-  if(dailyGroup&&dailyGroups&&dailyGroups.has(dailyGroup))return false;
+  // Stage9 holiday-work fix: daily frequency is a soft preference for the scenario's Primary Attention.
+  // A previous validation call must not erase HOLIDAY_WORK observation/care/appreciation candidates.
+  if(dailyGroup&&dailyGroups&&dailyGroups.has(dailyGroup)){
+    const keepPrimaryHoliday=intent.ctx.kind==='holiday_work'&&layer.attention==='HOLIDAY_WORK';
+    if(!keepPrimaryHoliday)return false;
+  }
 
   // usedGroupsはhard exclusionにしない。別semanticMeaning/Angleなら高関連FACTを使い切る。
   // 絶対score閾値を緩め、change候補が先に増えてもscenario FACTが不当に枯渇しないようにする。
