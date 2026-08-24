@@ -225,7 +225,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.2.4.2-stage10-interpretation-family-holidaywork-human-natural';
+const VERSION='0.2.4.2-final-mizuki-interpretation-family-guard-human-natural';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -636,6 +636,24 @@ function mvMizukiInterpretationFamily(intent,cand,attention){
   }
   return null;
 }
+// ---- 2026-08-24 Final Mizuki: Interpretation Meaning Group近接重複ガード ----
+// Family名が違っても、人間が「同じ話」と受け取る候補を同じ上位Meaning Groupへまとめる。
+// まず休日出勤だけを対象にし、他シナリオの既存成功ロジックには触れない。
+function mvMizukiInterpretationMeaningGroup(intent,cand,attention,interpretationFamily){
+  if(!intent||!intent.ctx||intent.ctx.kind!=='holiday_work')return null;
+  const m=String((cand&&cand.semanticMeaning)||''),k=String((cand&&cand.key)||'');
+  if(interpretationFamily==='APPRECIATION')return 'HOLIDAY_APPRECIATION';
+  if(interpretationFamily==='CONTRAST')return 'HOLIDAY_CONTRAST';
+  // CURRENT_TASK_CONTEXT と、現在業務名を含む CARE は、人間的にはどちらも
+  // 「休日出勤＋今の仕事」という同じ話なので同一Groupとして扱う。
+  if(interpretationFamily==='CURRENT_TASK_CONTEXT'||k==='current_task')return 'HOLIDAY_CURRENT_WORK';
+  if(interpretationFamily==='CARE'){
+    if(intent.ctx.currentTask&&m==='HOLIDAY_WORK_CARE')return 'HOLIDAY_CURRENT_WORK';
+    return 'HOLIDAY_CARE';
+  }
+  if(interpretationFamily==='STATE_ACKNOWLEDGEMENT')return 'HOLIDAY_STATE';
+  return null;
+}
 function mvMizukiHumanLayer(intent,cand){
   const attention=mvMizukiCandidateAttention(intent,cand),plan=mvMizukiAttentionPlan(intent),kind=intent.ctx.kind;
   let attentionScore=0,suppress=false;
@@ -646,7 +664,9 @@ function mvMizukiHumanLayer(intent,cand){
   // 「知っているが今は言わない」：終業後／休業日は未配置を口にしない。
   if(['just_ended','end_2h','day_off'].includes(kind)&&attention==='UNPLACED_WORKLOAD')suppress=true;
   if(kind==='holiday_work'&&attention==='UNPLACED_WORKLOAD')suppress=true;
-  return {attention,interpretation:mvMizukiInterpretation(intent,cand,attention),interpretationFamily:mvMizukiInterpretationFamily(intent,cand,attention),intent:mvMizukiSpeechIntent(cand),attentionScore,suppress};
+  const interpretationFamily=mvMizukiInterpretationFamily(intent,cand,attention);
+  const interpretationMeaningGroup=mvMizukiInterpretationMeaningGroup(intent,cand,attention,interpretationFamily);
+  return {attention,interpretation:mvMizukiInterpretation(intent,cand,attention),interpretationFamily,interpretationMeaningGroup,intent:mvMizukiSpeechIntent(cand),attentionScore,suppress};
 }
 function mvMizukiWouldHumanSayThisNow(intent,cand,layer){
   if(layer&&layer.suppress)return false;
@@ -1054,7 +1074,7 @@ function mvMizukiScenarioRelevance(intent,cand){
   }
   return 0;
 }
-function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,humanLayer=null){
+function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,usedInterpretationMeaningGroups,humanLayer=null){
   // Stage9: FACTの前に Attention → Interpretation → Intent を評価し、既存candidate rankingへ最小統合する。
   const layer=humanLayer||mvMizukiHumanLayer(intent,cand);
   let score=100-index*2+(cand.utteranceValue||0)+mvMizukiScenarioRelevance(intent,cand)+(layer.attentionScore||0);
@@ -1068,6 +1088,9 @@ function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic
   // 同じInterpretation Familyだけを強く下げ、別Familyは高価値候補として残す。
   if(intent.ctx.kind==='holiday_work'&&layer.interpretationFamily){
     if(usedInterpretationFamilies&&usedInterpretationFamilies.has(layer.interpretationFamily))score-=90;
+    // Final Mizuki: Family名が別でも上位Meaning Groupが同じなら近接再利用を強く下げる。
+    // 例：CURRENT_TASK_CONTEXT と「休日にも資料確認を進めている」CARE。
+    if(layer.interpretationMeaningGroup&&usedInterpretationMeaningGroups&&usedInterpretationMeaningGroups.has(layer.interpretationMeaningGroup))score-=110;
     // APPRECIATIONの直後に単純なHOLIDAY_WORK_STATE言い換えへ戻るより、
     // CURRENT_TASK_CONTEXT / CONTRAST / CAREを優先する。
     if(usedMeanings.has('HOLIDAY_WORK_APPRECIATION')&&cand.semanticMeaning==='HOLIDAY_WORK_STATE')score-=58;
@@ -1099,7 +1122,7 @@ function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic
   if(lastTopic===cand.key)score-=3;
   return score;
 }
-function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGroups,dailyGroups,usedInterpretationFamilies,humanLayer=null){
+function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGroups,dailyGroups,usedInterpretationFamilies,usedInterpretationMeaningGroups,humanLayer=null){
   // Stage9: 「知っているが今は言わない」をAttention/Intent層で判定してから既存価値判定へ進む。
   const layer=humanLayer||mvMizukiHumanLayer(intent,cand);
   if(!mvMizukiWouldHumanSayThisNow(intent,cand,layer))return false;
@@ -1116,6 +1139,9 @@ function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGro
   // Stage10: 休日出勤はAttention全体ではなくFamily単位で消費する。
   // 同一Familyの言い換えは再利用しないが、別Familyは残す。
   if(intent.ctx.kind==='holiday_work'&&layer.interpretationFamily&&usedInterpretationFamilies&&usedInterpretationFamilies.has(layer.interpretationFamily))return false;
+  // Final Mizuki: 同一5件内では、人間的に同じ話のMeaning Groupを近接再利用しない。
+  // 未使用の別Group／Small Talkがなくなった後は、低価値言い換えで埋めずQUIETへ進む。
+  if(intent.ctx.kind==='holiday_work'&&layer.interpretationMeaningGroup&&usedInterpretationMeaningGroups&&usedInterpretationMeaningGroups.has(layer.interpretationMeaningGroup))return false;
 
   const dailyGroup=mvMizukiDailyFrequencyGroup(cand.semanticMeaning,cand.speechKind);
   // Stage9 holiday-work fix: daily frequency is a soft preference for the scenario's Primary Attention.
@@ -1131,11 +1157,11 @@ function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGro
   if(cand.speechKind==='continuity')return score>=50;
   return score>=45;
 }
-function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,historicalUsed){
+function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,usedInterpretationMeaningGroups,historicalUsed){
   const candidates=mvMizukiValidationCandidates(intent);
   const ordered=candidates.map((cand,index)=>{
     const humanLayer=mvMizukiHumanLayer(intent,cand);
-    return {cand,index,humanLayer,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,humanLayer)};
+    return {cand,index,humanLayer,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,usedInterpretationMeaningGroups,humanLayer)};
   }).sort((a,b)=>b.score-a.score||a.index-b.index);
 
   // Stage8: 候補の価値順位を最優先する。
@@ -1143,7 +1169,7 @@ function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMean
   // 低価値なSmall Talk/枯渇へ逃げるために、高価値FACTを過去履歴だけで捨てない。
   for(const entry of ordered){
     const cand=entry.cand,layer=entry.humanLayer;
-    if(!mvMizukiCandidateHasNewHighValue(intent,cand,entry.score,usedMeanings,usedGroups,dailyGroups,usedInterpretationFamilies,layer))continue;
+    if(!mvMizukiCandidateHasNewHighValue(intent,cand,entry.score,usedMeanings,usedGroups,dailyGroups,usedInterpretationFamilies,usedInterpretationMeaningGroups,layer))continue;
     const start=((seed%cand.variants.length)+cand.variants.length)%cand.variants.length;
     const textPasses=[
       text=>!historicalUsed||!historicalUsed.has(text),
@@ -1153,7 +1179,7 @@ function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMean
       for(let j=0;j<cand.variants.length;j++){
         const text=cand.variants[(start+j)%cand.variants.length].replace(/\s+/g,' ').replace(/。 /g,'。').trim();
         if(/(今日は暑|今日は寒|雨ですね|雪ですね|台風|疲れています|集中でき|やる気が出)/.test(text))continue;
-        if(text&&!used.has(text)&&textPass(text))return {text,topic:cand.key,speechKind:cand.speechKind,semanticMeaning:cand.semanticMeaning,semanticAngle:cand.semanticAngle,attention:layer.attention,interpretationFamily:layer.interpretationFamily||null,interpretation:layer.interpretation,intentType:layer.intent,exhausted:false};
+        if(text&&!used.has(text)&&textPass(text))return {text,topic:cand.key,speechKind:cand.speechKind,semanticMeaning:cand.semanticMeaning,semanticAngle:cand.semanticAngle,attention:layer.attention,interpretationFamily:layer.interpretationFamily||null,interpretationMeaningGroup:layer.interpretationMeaningGroup||null,interpretation:layer.interpretation,intentType:layer.intent,exhausted:false};
       }
     }
   }
@@ -1193,7 +1219,7 @@ function mvGenerateRecords(ctx,persona,count,batchId){
   // Small Talk → exhaustion へ早期移行していた。
   const historicalUsed=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText).filter(Boolean));
   const used=persona==='mizuki'?new Set():new Set(historicalUsed); // 美月だけbatch内hard guard。凛・麗華の既存重複防止は変更しない。
-  const out=[];const usedTopics=new Set(),usedMeanings=new Set(),usedAngles=new Set(),usedGroups=new Set(),usedInterpretations=new Set(),usedInterpretationFamilies=new Set();let lastTopic=null,lastMeaning=null,lastInterpretation=null;
+  const out=[];const usedTopics=new Set(),usedMeanings=new Set(),usedAngles=new Set(),usedGroups=new Set(),usedInterpretations=new Set(),usedInterpretationFamilies=new Set(),usedInterpretationMeaningGroups=new Set();let lastTopic=null,lastMeaning=null,lastInterpretation=null;
   let exhaustionStateKey=null;const dailyGroups=new Set();
   if(persona==='mizuki'){
     // stateKey / continuity / daily frequencyは既存履歴を参照してよいが、
@@ -1203,17 +1229,17 @@ function mvGenerateRecords(ctx,persona,count,batchId){
   }
   for(let i=0;i<count;i++){
     const seed=(Number(ctx.presetKey)||1)*101+i*17+minimoValidation.records.length;
-    let finalText,semanticFocus=null,speechKind=null,semanticMeaning=null,semanticAngle=null,attention=null,interpretationFamily=null,interpretation=null,intentType=null,exhaustionGroup=null,exhausted=false;
+    let finalText,semanticFocus=null,speechKind=null,semanticMeaning=null,semanticAngle=null,attention=null,interpretationFamily=null,interpretationMeaningGroup=null,interpretation=null,intentType=null,exhaustionGroup=null,exhausted=false;
     if(persona==='mizuki'){
-      let rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,historicalUsed);
+      let rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,usedInterpretationMeaningGroups,historicalUsed);
       // 最終表示文の絶対guard。同一batchで一致した場合は別seedで再選択する。
       for(let retry=0;retry<8&&rendered&&used.has(rendered.text);retry++){
-        rendered=mvRenderMizukiValidation(intent,seed+(retry+1)*997,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,historicalUsed);
+        rendered=mvRenderMizukiValidation(intent,seed+(retry+1)*997,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,usedInterpretationMeaningGroups,historicalUsed);
       }
-      finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;attention=rendered.attention||null;interpretationFamily=rendered.interpretationFamily||null;interpretation=rendered.interpretation||null;intentType=rendered.intentType||null;exhausted=!!rendered.exhausted;
+      finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;attention=rendered.attention||null;interpretationFamily=rendered.interpretationFamily||null;interpretationMeaningGroup=rendered.interpretationMeaningGroup||null;interpretation=rendered.interpretation||null;intentType=rendered.intentType||null;exhausted=!!rendered.exhausted;
       exhaustionGroup=exhausted?`CONVERSATION_EXHAUSTION:${semanticMeaning}`:mvMizukiSemanticGroup(intent,semanticMeaning,semanticAngle);
       usedTopics.add(rendered.topic);lastTopic=rendered.topic;lastMeaning=semanticMeaning;lastInterpretation=interpretation;
-      usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);if(interpretation)usedInterpretations.add(interpretation);if(interpretationFamily)usedInterpretationFamilies.add(interpretationFamily);
+      usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);if(interpretation)usedInterpretations.add(interpretation);if(interpretationFamily)usedInterpretationFamilies.add(interpretationFamily);if(interpretationMeaningGroup)usedInterpretationMeaningGroups.add(interpretationMeaningGroup);
       if(!exhausted){
         usedGroups.add(exhaustionGroup);
         const dg=mvMizukiDailyFrequencyGroup(semanticMeaning,speechKind);if(dg)dailyGroups.add(dg);
@@ -1221,7 +1247,7 @@ function mvGenerateRecords(ctx,persona,count,batchId){
     }else finalText=mvRenderComment(intent,persona,seed,used);
     // 凛・麗華の既存経路は変更せず、共通のbatch内最終表示重複guardだけ維持。
     used.add(finalText);
-    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,attention,interpretationFamily,interpretation,intentType,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'stage10-interpretation-family-holidaywork':null}});
+    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,attention,interpretationFamily,interpretationMeaningGroup,interpretation,intentType,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'final-mizuki-interpretation-family-guard':null}});
   }
   return out;
 }
