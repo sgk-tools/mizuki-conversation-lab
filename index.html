@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>Mizuki Conversation Lab v0.2.4.2 FinalMizuki PostQuietGuard</title>
+<title>Mizuki Conversation Lab v0.2.4.2 FinalMizuki QuietStateRootCauseFix</title>
 <style>
 :root{
   --bg:#f5f6f8;--panel:#ffffff;--text:#17181b;--sub:#6f737b;--line:#e6e8ec;
@@ -217,7 +217,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.2.4.2 FinalMizuki · CoreMeaningGuard / PostQuietGuard / HumanNatural</div>
+    <div class="version">Mizuki Conversation Lab v0.2.4.2 FinalMizuki · CoreMeaningGuard / QuietStateRootCauseFix / HumanNatural</div>
   </div>
 </div>
 
@@ -724,6 +724,14 @@ function mvMizukiConversationStateKey(ctx){
     String(unplacedBucket),(ctx.completedTasks||[]).join('>'),ctx.change||''
   ].join('||');
 }
+function mvMizukiRecordIsQuiet(r){
+  if(!r)return false;
+  const logic=r.labLogic||{},text=String(r.finalText||'').trim();
+  // Root-cause fix: 旧版評価履歴では画面に「……。」が保存されていても、
+  // postQuietHold / QUIET_RESPONSE がまだ保存されていないレコードが存在し得る。
+  // QUIET状態は内部メタデータだけでなく、実際の最終表示文も含めて認識する。
+  return logic.postQuietHold===true||logic.semanticMeaning==='QUIET_RESPONSE'||text==='……。';
+}
 function mvMizukiPostQuietActiveFromHistory(ctx){
   const stateKey=mvMizukiConversationStateKey(ctx),preset=String(ctx.presetKey||''),day=mvMizukiDateKey(ctx.dateTime);
   let enteredSameState=false;
@@ -734,12 +742,11 @@ function mvMizukiPostQuietActiveFromHistory(ctx){
     if(mvMizukiDateKey(r.scenario.dateTime)!==day)continue;
     const recKey=mvMizukiConversationStateKey(r.scenario);
     if(!enteredSameState){
-      // 直近の同preset状態が現在と違えば、意味のある変化が起きたのでQUIETを解除する。
+      // 直近の同preset状態が現在と違えば、意味のあるFACT変化が起きたのでQUIETを解除する。
       if(recKey!==stateKey)return false;
       enteredSameState=true;
     }else if(recKey!==stateKey)break;
-    const logic=r.labLogic||{};
-    if(logic.postQuietHold===true||logic.semanticMeaning==='QUIET_RESPONSE')return true;
+    if(mvMizukiRecordIsQuiet(r))return true;
   }
   return false;
 }
@@ -1311,7 +1318,9 @@ function mvGenerateRecords(ctx,persona,count,batchId){
         rendered=mvRenderMizukiValidation(intent,seed+(retry+1)*997,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,usedInterpretationMeaningGroups,historicalUsed);
       }
       finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;attention=rendered.attention||null;interpretationFamily=rendered.interpretationFamily||null;interpretationMeaningGroup=rendered.interpretationMeaningGroup||null;interpretation=rendered.interpretation||null;intentType=rendered.intentType||null;exhausted=!!rendered.exhausted;
-      if(exhausted&&semanticMeaning==='QUIET_RESPONSE')postQuietActive=true;
+      // QUIET到達判定はsemanticMeaningだけに依存しない。
+      // 旧履歴互換と最終表示基準を揃え、実際に「……。」を表示した時点で保持状態へ入る。
+      if(exhausted&&(rendered.postQuietHold===true||semanticMeaning==='QUIET_RESPONSE'||String(finalText||'').trim()==='……。'))postQuietActive=true;
       exhaustionGroup=exhausted?`CONVERSATION_EXHAUSTION:${semanticMeaning}`:mvMizukiSemanticGroup(intent,semanticMeaning,semanticAngle);
       usedTopics.add(rendered.topic);lastTopic=rendered.topic;lastMeaning=semanticMeaning;lastInterpretation=interpretation;
       usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);if(interpretation)usedInterpretations.add(interpretation);if(interpretationFamily)usedInterpretationFamilies.add(interpretationFamily);if(interpretationMeaningGroup)usedInterpretationMeaningGroups.add(interpretationMeaningGroup);
@@ -1322,7 +1331,7 @@ function mvGenerateRecords(ctx,persona,count,batchId){
     }else finalText=mvRenderComment(intent,persona,seed,used);
     // 凛・麗華の既存経路は変更せず、共通のbatch内最終表示重複guardだけ維持。
     used.add(finalText);
-    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,attention,interpretationFamily,interpretationMeaningGroup,interpretation,intentType,exhaustionStateKey,conversationStateKey,exhaustionGroup,exhausted,postQuietHold:persona==='mizuki'&&postQuietActive&&semanticMeaning==='QUIET_RESPONSE',humanContextLayer:persona==='mizuki'?'final-mizuki-core-meaning-guard-post-quiet-guard':null}});
+    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,attention,interpretationFamily,interpretationMeaningGroup,interpretation,intentType,exhaustionStateKey,conversationStateKey,exhaustionGroup,exhausted,postQuietHold:persona==='mizuki'&&postQuietActive&&(semanticMeaning==='QUIET_RESPONSE'||String(finalText||'').trim()==='……。'),humanContextLayer:persona==='mizuki'?'final-mizuki-core-meaning-guard-quiet-state-root-cause-fix':null}});
   }
   return out;
 }
