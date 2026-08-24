@@ -225,7 +225,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.2.4.2-stage8-candidate-path-fix-exhaustion-fix-finaltext-guard';
+const VERSION='0.2.4.2-stage9-attention-interpretation-intent-human-natural';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -492,7 +492,7 @@ function mvMizukiDailyFrequencyGroup(meaning,speechKind){
   if(/^SMALLTALK_SEASON_/.test(m))return 'DAILY_SMALLTALK_SEASON';
   if(/^SMALLTALK_DAYPART_/.test(m))return `DAILY_${m}`;
   if(['HOLIDAY_WORK_STATE','HOLIDAY_WORK_APPRECIATION','HOLIDAY_WORK_ACK'].includes(m))return 'DAILY_HOLIDAY_WORK_CONTEXT';
-  if(['AFTER_HOLIDAY_CARE','LONG_OVERTIME_TREND_ACK','EARLY_START_CARE','END_OF_WORK_APPRECIATION','BUSY_DAY_ACK'].includes(m))return `DAILY_${m}`;
+  if(['AFTER_HOLIDAY_CARE','LONG_OVERTIME_TREND_ACK','EARLY_START_CARE','END_OF_WORK_APPRECIATION','BUSY_DAY_ACK','LONG_OVERTIME_APPRECIATION','MULTIPLE_COMPLETED_APPRECIATION'].includes(m))return `DAILY_${m}`;
   return null;
 }
 function mvMizukiDailyUsage(ctx){
@@ -519,6 +519,113 @@ function mvMizukiCareFacts(ctx){
     busyDay: kind==='many_plans'||/予定.{0,6}(かなり|非常に).{0,4}(詰|多)|忙しい日/.test(change),
     earlyStart: /早いスタート|早朝勤務|朝早く/.test(change)
   };
+}
+
+// ---- 2026-08-24 Stage9: Attention → Interpretation → Intent（美月検証専用） ----
+// 文章を増やすのではなく、既存candidateを「何に気づいたか／どう受け取るか／なぜ今言うか」で評価する。
+function mvMizukiSpeechIntent(cand){
+  switch(cand.speechKind){
+    case 'acknowledgement':return 'ACKNOWLEDGE';
+    case 'appreciation':return 'APPRECIATE';
+    case 'care':return 'CARE';
+    case 'continuity':return 'CONNECT';
+    case 'smalltalk':return 'SMALL_TALK';
+    case 'exhaustion':return 'QUIET';
+    case 'advice':return 'ADVISE';
+    default:return 'OBSERVE';
+  }
+}
+function mvMizukiAttentionPlan(intent){
+  const kind=intent.ctx.kind;
+  const plans={
+    pre_start:{primary:['PRE_WORK_CONTEXT','FIRST_PLAN'],secondary:['SMALL_TALK']},
+    in_task:{primary:['STATE_CHANGE','CURRENT_WORK'],secondary:['NEXT_PLAN','COMPLETED_PROGRESS']},
+    next_10:{primary:['STATE_CHANGE','UPCOMING_PLAN'],secondary:['CURRENT_WORK','COMPLETED_PROGRESS']},
+    next_5:{primary:['STATE_CHANGE','UPCOMING_PLAN'],secondary:['CURRENT_WORK','COMPLETED_PROGRESS']},
+    next_30:{primary:['STATE_CHANGE','UPCOMING_PLAN'],secondary:['CURRENT_WORK','COMPLETED_PROGRESS']},
+    one_done:{primary:['STATE_CHANGE','COMPLETED_PROGRESS'],secondary:['CURRENT_WORK','NEXT_PLAN']},
+    multi_done:{primary:['STATE_CHANGE','COMPLETED_PROGRESS'],secondary:['CURRENT_WORK','NEXT_PLAN']},
+    holiday_work:{primary:['HOLIDAY_WORK'],secondary:['CURRENT_WORK','COMPLETED_PROGRESS']},
+    just_ended:{primary:['WORKDAY_END'],secondary:['COMPLETED_PROGRESS','SMALL_TALK']},
+    end_2h:{primary:['LONG_WORK_AFTER_END'],secondary:['COMPLETED_PROGRESS','CURRENT_WORK','SMALL_TALK']},
+    no_change:{primary:['STATE_CONTINUITY','CURRENT_WORK'],secondary:['NEXT_PLAN','COMPLETED_PROGRESS','SMALL_TALK']}
+  };
+  return plans[kind]||{primary:['STATE_CHANGE'],secondary:['CURRENT_WORK','NEXT_PLAN','COMPLETED_PROGRESS','SMALL_TALK']};
+}
+function mvMizukiCandidateAttention(intent,cand){
+  const m=String(cand.semanticMeaning||''),k=String(cand.key||'');
+  if(k.startsWith('change_'))return 'STATE_CHANGE';
+  if(/^SMALLTALK_/.test(m)||cand.speechKind==='smalltalk')return 'SMALL_TALK';
+  if(['LONG_OVERTIME_STATE','LONG_OVERTIME_CARE','LONG_OVERTIME_APPRECIATION'].includes(m)||k==='overtime'||k==='overtime_care'||k==='overtime_appreciation')return 'LONG_WORK_AFTER_END';
+  if(['HOLIDAY_WORK_STATE','HOLIDAY_WORK_APPRECIATION','HOLIDAY_WORK_ACK'].includes(m)||k.startsWith('holiday_work'))return 'HOLIDAY_WORK';
+  if(['WORKDAY_ENDED','END_OF_WORK_APPRECIATION'].includes(m)||k==='just_ended'||k==='just_ended_appreciation')return 'WORKDAY_END';
+  if(['MULTIPLE_COMPLETED_ACK','MULTIPLE_COMPLETED_APPRECIATION','COMPLETED_TASK','MAJOR_TASK_COMPLETED_APPRECIATION','COMPLETION_ADVANCES_SCHEDULE'].includes(m)||k.startsWith('completed_')||k.startsWith('multi_completed'))return 'COMPLETED_PROGRESS';
+  if(['PRE_START_STATE','SCHEDULE_NOT_STARTED'].includes(m))return 'PRE_WORK_CONTEXT';
+  if(['FIRST_PLAN_START_TIME','TIME_UNTIL_FIRST_PLAN','CLOCK_TO_FIRST_PLAN','DAY_START_SEQUENCE'].includes(m))return 'FIRST_PLAN';
+  if(['NEXT_IN_N_MINUTES','NEXT_START_TIME','CURRENT_TO_NEXT','CURRENT_END_TO_NEXT_START','COMPLETED_TO_NEXT','NEXT_PLAN'].includes(m)||k.startsWith('upcoming_')||k==='next_plan')return 'UPCOMING_PLAN';
+  if(/^CURRENT_/.test(m)||k==='current_task'||k==='current_start_context'||k==='current_end')return 'CURRENT_WORK';
+  if(m==='no_change'||m==='CURRENT_TASK_CONTINUES'||m==='BUSY_FLOW_CONTINUES'||k==='no_change'||k.startsWith('continuity_'))return 'STATE_CONTINUITY';
+  if(/UNPLACED|WORKLOAD/.test(m)||k.includes('unplaced'))return 'UNPLACED_WORKLOAD';
+  return 'CURRENT_CONTEXT';
+}
+function mvMizukiInterpretation(intent,cand,attention){
+  const m=String(cand.semanticMeaning||'');
+  if(attention==='STATE_CHANGE')return 'STATE_CHANGED_SINCE_LAST_CALL';
+  if(attention==='LONG_WORK_AFTER_END')return m==='LONG_OVERTIME_APPRECIATION'?'LONG_WORK_WORTH_APPRECIATION':'LONG_WORKDAY';
+  if(attention==='HOLIDAY_WORK')return 'WORKING_ON_DAY_OFF';
+  if(attention==='WORKDAY_END')return 'WORKDAY_REACHED_END';
+  if(attention==='COMPLETED_PROGRESS'){
+    if(m==='MULTIPLE_COMPLETED_APPRECIATION')return 'PROGRESS_WORTH_APPRECIATION';
+    if(m==='MULTIPLE_COMPLETED_ACK')return 'GOOD_PROGRESS_TODAY';
+    if(m==='COMPLETED_TASK')return 'TASK_COMPLETED';
+    if(['COMPLETED_TO_CURRENT','COMPLETED_TO_CURRENT_WINDOW'].includes(m))return 'COMPLETION_TO_CURRENT_TRANSITION';
+    if(m==='COMPLETION_ADVANCES_SCHEDULE')return 'SCHEDULE_ADVANCED_AFTER_COMPLETION';
+    if(m==='MAJOR_TASK_COMPLETED_APPRECIATION')return 'MAJOR_TASK_REACHED_BREAK';
+    return 'A_TASK_REACHED_A_BREAK';
+  }
+  if(attention==='UPCOMING_PLAN'){
+    if(m==='NEXT_IN_N_MINUTES')return 'NEXT_PLAN_IS_NEAR';
+    if(m==='NEXT_START_TIME')return 'NEXT_PLAN_START_TIME';
+    if(['CURRENT_TO_NEXT','CURRENT_END_TO_NEXT_START','COMPLETED_TO_NEXT'].includes(m))return 'TRANSITION_TO_NEXT_PLAN';
+    return 'NEXT_TRANSITION_IS_NEAR';
+  }
+  if(attention==='PRE_WORK_CONTEXT')return 'BEFORE_WORKDAY_START';
+  if(attention==='FIRST_PLAN'){
+    if(m==='FIRST_PLAN_START_TIME')return 'FIRST_PLAN_START_TIME';
+    if(m==='TIME_UNTIL_FIRST_PLAN')return 'FIRST_PLAN_IS_NEAR';
+    if(m==='DAY_START_SEQUENCE')return 'DAY_BEGINS_WITH_FIRST_PLAN';
+    if(m==='CLOCK_TO_FIRST_PLAN')return 'CLOCK_RELATION_TO_FIRST_PLAN';
+    return 'FIRST_PLAN_CONTEXT';
+  }
+  if(attention==='CURRENT_WORK'){
+    if(/START_TIME/.test(m))return 'CURRENT_WORK_START_TIME';
+    if(/END_TIME/.test(m))return 'CURRENT_WORK_END_TIME';
+    if(/WINDOW/.test(m))return 'CURRENT_WORK_TIME_WINDOW';
+    return 'CURRENT_WORK_IN_PROGRESS';
+  }
+  if(attention==='UNPLACED_WORKLOAD')return 'WORKLOAD_NOT_FULLY_SCHEDULED';
+  if(attention==='SMALL_TALK')return 'CALENDAR_OR_TIME_CONTEXT';
+  if(attention==='STATE_CONTINUITY')return 'STATE_IS_CONTINUING';
+  return cand.semanticMeaning||'CURRENT_CONTEXT';
+}
+function mvMizukiHumanLayer(intent,cand){
+  const attention=mvMizukiCandidateAttention(intent,cand),plan=mvMizukiAttentionPlan(intent),kind=intent.ctx.kind;
+  let attentionScore=0,suppress=false;
+  if(String(cand.key||'').startsWith('change_'))attentionScore+=10;
+  if(plan.primary.includes(attention))attentionScore+=22;
+  else if(plan.secondary.includes(attention))attentionScore+=9;
+  if(kind==='end_30'&&attention==='UNPLACED_WORKLOAD')attentionScore-=55;
+  // 「知っているが今は言わない」：終業後／休業日は未配置を口にしない。
+  if(['just_ended','end_2h','day_off'].includes(kind)&&attention==='UNPLACED_WORKLOAD')suppress=true;
+  if(kind==='holiday_work'&&attention==='UNPLACED_WORKLOAD')suppress=true;
+  return {attention,interpretation:mvMizukiInterpretation(intent,cand,attention),intent:mvMizukiSpeechIntent(cand),attentionScore,suppress};
+}
+function mvMizukiWouldHumanSayThisNow(intent,cand,layer){
+  if(layer&&layer.suppress)return false;
+  // 根拠のない感情・体調推測、天候推測は既存ガードと二重で拒否する。
+  const all=(cand.variants||[]).join(' ');
+  if(/(疲れています|集中力が|やる気が|今日は暑|今日は寒|雨ですね|雪ですね|台風)/.test(all))return false;
+  return true;
 }
 // ---- 2026-08-23 Stage4: 同一状況での会話枯渇処理（Labのみ） ----
 function mvMizukiStateKey(ctx){
@@ -730,6 +837,7 @@ function mvMizukiValidationCandidates(intent){
     case 'one_done':case 'multi_done':
       if(completed.length)add('completed_specific',[completed.length===1?`${completedOne}は終わったんですね。`:`${completedList}まで終わったんですね。`,completed.length===1?`${completedOne}が一区切りついたんですね。`:`いくつか一区切りついたんですね。`],'acknowledgement',{semanticMeaning:'COMPLETED_TASK',semanticAngle:'COMPLETION_REACTION',utteranceValue:32});
       if(c.kind==='multi_done'&&completed.length>1)add('multi_completed_ack',[`今日はもういくつか片づいているんですね。`,`今日はここまで結構進んでいますね。`],'acknowledgement',{semanticMeaning:'MULTIPLE_COMPLETED_ACK',semanticAngle:'PROGRESS_ACKNOWLEDGEMENT',utteranceValue:25});
+      if(c.kind==='multi_done'&&completed.length>1)add('multi_done_appreciation',[`今日は結構進みましたね。お疲れさまです。`,`いくつか片づきましたね。ひと区切りですね。`],'appreciation',{semanticMeaning:'MULTIPLE_COMPLETED_APPRECIATION',semanticAngle:'PROGRESS_APPRECIATION',utteranceValue:24});
       if(completedOne&&current)add('completed_to_current',current==='次の業務'?[`${completedOne}が終わって、次の業務へ移るところなんですね。`,`${completedOne}を終えて、次の作業に切り替わるところなんですね。`]:[`${completedOne}が終わって、このあとは${current}なんですね。`,`${completedOne}を終えて、次は${current}なんですね。`],'observation',{semanticMeaning:'COMPLETED_TO_CURRENT',semanticAngle:'PREVIOUS_TO_CURRENT',utteranceValue:29});
       if(completedOne)add('completion_progress_shift',[`${completedOne}が終わって、予定が一つ先に進んだんですね。`,`${completedOne}が終わって、今日の流れが一つ進んだんですね。`],'acknowledgement',{semanticMeaning:'COMPLETION_ADVANCES_SCHEDULE',semanticAngle:'PROGRESS_CHANGE',utteranceValue:27});
       if(current&&currentStartLabel)add('current_start_after_done',[`${current}は${currentStartLabel}からなんですね。`,current==='次の業務'?`次の業務は${currentStartLabel}からなんですね。`:`このあとの${current}は${currentStartLabel}からなんですね。`],'observation',{semanticMeaning:'CURRENT_START_AFTER_COMPLETION',semanticAngle:'TIME_CONTEXT_START',utteranceValue:24});
@@ -810,7 +918,8 @@ function mvMizukiValidationCandidates(intent){
       break;
     case 'end_2h':
       add('overtime',[`もう終業から2時間ほど経っていますね。`,`今日は勤務時間をかなり越えていますね。`],'observation',{semanticMeaning:'LONG_OVERTIME_STATE',semanticAngle:'TIME_CONTEXT',utteranceValue:31});
-      add('overtime_care',[`今日は長い一日になっていますね。`,`ここまで勤務時間が長くなっているんですね。`],'care',{semanticMeaning:'LONG_OVERTIME_CARE',semanticAngle:'CARE_TIME_LOAD',utteranceValue:27});
+      add('overtime_care',current?[`まだ仕事してるんですね。今日は長い一日ですね。`,`まだ${current}を続けているんですね。今日は長い一日ですね。`]:[`今日は長い一日になっていますね。`,`ここまで勤務時間が長くなっているんですね。`],'care',{semanticMeaning:'LONG_OVERTIME_CARE',semanticAngle:'CARE_TIME_LOAD',utteranceValue:30});
+      add('overtime_appreciation',[`勤務時間をかなり過ぎていますね。お疲れさまです。`],'appreciation',{semanticMeaning:'LONG_OVERTIME_APPRECIATION',semanticAngle:'APPRECIATION_TIME_LOAD',utteranceValue:26});
       if(current)add('current_task',[`まだ${current}を続けているんですね。`]);
       if(completed.length)add('completed_specific',[`今日はここまでに${completed.length}件、終わっているんですね。`],'acknowledgement',{semanticMeaning:'MULTIPLE_COMPLETED_ACK',semanticAngle:'PROGRESS_ACKNOWLEDGEMENT',utteranceValue:18});
       if(c.unplacedMinutes>0)add('unplaced_observation',[`まだ予定に入りきっていない分も残っていますね。`]);
@@ -900,8 +1009,12 @@ function mvMizukiScenarioRelevance(intent,cand){
     const w={many_plans:34,busy_day_care:30,current_task:20,next_plan:18,completed_specific:12,many_plans_advice:-34};
     return Object.prototype.hasOwnProperty.call(w,key)?w[key]:0;
   }
+  if(kind==='multi_done'){
+    const w={multi_completed_ack:42,multi_done_appreciation:39,completed_specific:36,completed_to_current:25,completion_progress_shift:30,current_start_after_done:16,current_end_after_done:14,completed_with_unplaced:-28};
+    return Object.prototype.hasOwnProperty.call(w,key)?w[key]:0;
+  }
   if(kind==='end_2h'){
-    const w={overtime:40,overtime_care:36,current_task:20,completed_specific:18,unplaced_observation:5,overtime_advice:-44};
+    const w={overtime:48,overtime_care:46,overtime_appreciation:42,current_task:18,completed_specific:20,unplaced_observation:-80,overtime_advice:-60};
     return Object.prototype.hasOwnProperty.call(w,key)?w[key]:0;
   }
   if(kind==='just_ended'){
@@ -910,15 +1023,16 @@ function mvMizukiScenarioRelevance(intent,cand){
   }
   return 0;
 }
-function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups){
-  // Stage7: candidate配列上の位置より「今言う価値」を優先。枯渇判定は全通常候補評価後に行う。
-  let score=100-index*2+(cand.utteranceValue||0)+mvMizukiScenarioRelevance(intent,cand);
-  if(cand.speechKind==='appreciation')score+=7;
-  if(cand.speechKind==='care')score+=4;
-  if(cand.speechKind==='acknowledgement')score+=5;
-  if(cand.speechKind==='continuity')score-=10;
-  if(cand.speechKind==='smalltalk')score-=14;            // scenario FACT > CARE > Small Talk > exhaustion
-  if(cand.speechKind==='advice')score-=54;               // Adviceは枯渇より後。通常穴埋めには使わない
+function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,humanLayer=null){
+  // Stage9: FACTの前に Attention → Interpretation → Intent を評価し、既存candidate rankingへ最小統合する。
+  const layer=humanLayer||mvMizukiHumanLayer(intent,cand);
+  let score=100-index*2+(cand.utteranceValue||0)+mvMizukiScenarioRelevance(intent,cand)+(layer.attentionScore||0);
+  if(layer.intent==='APPRECIATE')score+=7;
+  if(layer.intent==='CARE')score+=4;
+  if(layer.intent==='ACKNOWLEDGE')score+=5;
+  if(layer.intent==='CONNECT')score-=10;
+  if(layer.intent==='SMALL_TALK')score-=14;              // scenario FACT > CARE > Small Talk > exhaustion
+  if(layer.intent==='ADVISE')score-=54;                  // Adviceは引き続き最下位
   if(cand.speechKind==='noNewInformation')score-=70;     // 通常candidateとしては採用しない
   if(cand.key.startsWith('generic_'))score-=48;
 
@@ -926,6 +1040,9 @@ function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic
   if(usedMeanings.has(cand.semanticMeaning))score-=strictMeaning?72:48;
   if(usedAngles.has(cand.semanticAngle))score-=strictMeaning?18:12;
   if(lastMeaning===cand.semanticMeaning)score-=strictMeaning?20:12;
+  // Interpretationは文章やIntentが違っても同じ受け取りを連続しすぎないためのsoft penalty。
+  if(usedInterpretations&&usedInterpretations.has(layer.interpretation))score-=65;
+  if(lastInterpretation&&lastInterpretation===layer.interpretation)score-=25;
 
   // semanticGroupは「同じ着眼点系列」のsoft penaltyに留める。
   // START_TIME後のTIME_UNTIL_STARTなど、高価値な別meaning/angleまで消費済みにしない。
@@ -938,8 +1055,10 @@ function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic
   if(lastTopic===cand.key)score-=3;
   return score;
 }
-function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGroups,dailyGroups){
-  // Stage7: exhaustion gateは最後。ここでは「まだ口にする価値がある通常候補か」だけを見る。
+function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGroups,dailyGroups,humanLayer=null){
+  // Stage9: 「知っているが今は言わない」をAttention/Intent層で判定してから既存価値判定へ進む。
+  const layer=humanLayer||mvMizukiHumanLayer(intent,cand);
+  if(!mvMizukiWouldHumanSayThisNow(intent,cand,layer))return false;
   if(!['observation','acknowledgement','care','appreciation','continuity','smalltalk'].includes(cand.speechKind))return false;
   if(cand.key.startsWith('generic_'))return false;
   if(cand.speechKind==='noNewInformation'||cand.speechKind==='advice')return false;
@@ -957,17 +1076,19 @@ function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGro
   if(cand.speechKind==='continuity')return score>=50;
   return score>=45;
 }
-function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,historicalUsed){
+function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,historicalUsed){
   const candidates=mvMizukiValidationCandidates(intent);
-  const ordered=candidates.map((cand,index)=>({cand,index,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups)}))
-    .sort((a,b)=>b.score-a.score||a.index-b.index);
+  const ordered=candidates.map((cand,index)=>{
+    const humanLayer=mvMizukiHumanLayer(intent,cand);
+    return {cand,index,humanLayer,score:mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,humanLayer)};
+  }).sort((a,b)=>b.score-a.score||a.index-b.index);
 
   // Stage8: 候補の価値順位を最優先する。
   // 各candidate内で「過去に未使用の文 → 過去に使用済みだが同一batchでは未使用の文」の順に探す。
   // 低価値なSmall Talk/枯渇へ逃げるために、高価値FACTを過去履歴だけで捨てない。
   for(const entry of ordered){
-    const cand=entry.cand;
-    if(!mvMizukiCandidateHasNewHighValue(intent,cand,entry.score,usedMeanings,usedGroups,dailyGroups))continue;
+    const cand=entry.cand,layer=entry.humanLayer;
+    if(!mvMizukiCandidateHasNewHighValue(intent,cand,entry.score,usedMeanings,usedGroups,dailyGroups,layer))continue;
     const start=((seed%cand.variants.length)+cand.variants.length)%cand.variants.length;
     const textPasses=[
       text=>!historicalUsed||!historicalUsed.has(text),
@@ -977,13 +1098,14 @@ function mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMean
       for(let j=0;j<cand.variants.length;j++){
         const text=cand.variants[(start+j)%cand.variants.length].replace(/\s+/g,' ').replace(/。 /g,'。').trim();
         if(/(今日は暑|今日は寒|雨ですね|雪ですね|台風|疲れています|集中でき|やる気が出)/.test(text))continue;
-        if(text&&!used.has(text)&&textPass(text))return {text,topic:cand.key,speechKind:cand.speechKind,semanticMeaning:cand.semanticMeaning,semanticAngle:cand.semanticAngle,exhausted:false};
+        if(text&&!used.has(text)&&textPass(text))return {text,topic:cand.key,speechKind:cand.speechKind,semanticMeaning:cand.semanticMeaning,semanticAngle:cand.semanticAngle,attention:layer.attention,interpretation:layer.interpretation,intentType:layer.intent,exhausted:false};
       }
     }
   }
 
   // 全通常candidateを評価した後、本当に採用可能文がゼロの場合だけ枯渇へ進む。
-  return mvRenderMizukiExhaustion(intent,seed,used,usedMeanings,lastMeaning,historicalUsed);
+  const quiet=mvRenderMizukiExhaustion(intent,seed,used,usedMeanings,lastMeaning,historicalUsed);
+  return {...quiet,attention:'NO_NEW_HIGH_VALUE',interpretation:'NO_NEW_VALUE_TO_SAY',intentType:'QUIET'};
 }
 
 function mvRenderComment(intent,persona,seed,used){
@@ -1016,7 +1138,7 @@ function mvGenerateRecords(ctx,persona,count,batchId){
   // Small Talk → exhaustion へ早期移行していた。
   const historicalUsed=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText).filter(Boolean));
   const used=persona==='mizuki'?new Set():new Set(historicalUsed); // 美月だけbatch内hard guard。凛・麗華の既存重複防止は変更しない。
-  const out=[];const usedTopics=new Set(),usedMeanings=new Set(),usedAngles=new Set(),usedGroups=new Set();let lastTopic=null,lastMeaning=null;
+  const out=[];const usedTopics=new Set(),usedMeanings=new Set(),usedAngles=new Set(),usedGroups=new Set(),usedInterpretations=new Set();let lastTopic=null,lastMeaning=null,lastInterpretation=null;
   let exhaustionStateKey=null;const dailyGroups=new Set();
   if(persona==='mizuki'){
     // stateKey / continuity / daily frequencyは既存履歴を参照してよいが、
@@ -1026,17 +1148,17 @@ function mvGenerateRecords(ctx,persona,count,batchId){
   }
   for(let i=0;i<count;i++){
     const seed=(Number(ctx.presetKey)||1)*101+i*17+minimoValidation.records.length;
-    let finalText,semanticFocus=null,speechKind=null,semanticMeaning=null,semanticAngle=null,exhaustionGroup=null,exhausted=false;
+    let finalText,semanticFocus=null,speechKind=null,semanticMeaning=null,semanticAngle=null,attention=null,interpretation=null,intentType=null,exhaustionGroup=null,exhausted=false;
     if(persona==='mizuki'){
-      let rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,historicalUsed);
+      let rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,historicalUsed);
       // 最終表示文の絶対guard。同一batchで一致した場合は別seedで再選択する。
       for(let retry=0;retry<8&&rendered&&used.has(rendered.text);retry++){
-        rendered=mvRenderMizukiValidation(intent,seed+(retry+1)*997,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,historicalUsed);
+        rendered=mvRenderMizukiValidation(intent,seed+(retry+1)*997,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,historicalUsed);
       }
-      finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;exhausted=!!rendered.exhausted;
+      finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;attention=rendered.attention||null;interpretation=rendered.interpretation||null;intentType=rendered.intentType||null;exhausted=!!rendered.exhausted;
       exhaustionGroup=exhausted?`CONVERSATION_EXHAUSTION:${semanticMeaning}`:mvMizukiSemanticGroup(intent,semanticMeaning,semanticAngle);
-      usedTopics.add(rendered.topic);lastTopic=rendered.topic;lastMeaning=semanticMeaning;
-      usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);
+      usedTopics.add(rendered.topic);lastTopic=rendered.topic;lastMeaning=semanticMeaning;lastInterpretation=interpretation;
+      usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);if(interpretation)usedInterpretations.add(interpretation);
       if(!exhausted){
         usedGroups.add(exhaustionGroup);
         const dg=mvMizukiDailyFrequencyGroup(semanticMeaning,speechKind);if(dg)dailyGroups.add(dg);
@@ -1044,7 +1166,7 @@ function mvGenerateRecords(ctx,persona,count,batchId){
     }else finalText=mvRenderComment(intent,persona,seed,used);
     // 凛・麗華の既存経路は変更せず、共通のbatch内最終表示重複guardだけ維持。
     used.add(finalText);
-    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'stage8':null}});
+    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,attention,interpretation,intentType,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'stage9-attention-interpretation-intent':null}});
   }
   return out;
 }
