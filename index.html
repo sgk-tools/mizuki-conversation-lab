@@ -217,7 +217,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.2.4.2 Stage8 · CandidatePathFix / ExhaustionFix / FinalTextGuard</div>
+    <div class="version">Mizuki Conversation Lab v0.2.4.2 FinalMizuki · CoreMeaningGuard / HumanNatural</div>
   </div>
 </div>
 
@@ -225,7 +225,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.2.4.2-final-mizuki-interpretation-family-guard-human-natural';
+const VERSION='0.2.4.2-final-mizuki-core-meaning-guard-human-natural';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -640,18 +640,40 @@ function mvMizukiInterpretationFamily(intent,cand,attention){
 // Family名が違っても、人間が「同じ話」と受け取る候補を同じ上位Meaning Groupへまとめる。
 // まず休日出勤だけを対象にし、他シナリオの既存成功ロジックには触れない。
 function mvMizukiInterpretationMeaningGroup(intent,cand,attention,interpretationFamily){
-  if(!intent||!intent.ctx||intent.ctx.kind!=='holiday_work')return null;
-  const m=String((cand&&cand.semanticMeaning)||''),k=String((cand&&cand.key)||'');
-  if(interpretationFamily==='APPRECIATION')return 'HOLIDAY_APPRECIATION';
-  if(interpretationFamily==='CONTRAST')return 'HOLIDAY_CONTRAST';
-  // CURRENT_TASK_CONTEXT と、現在業務名を含む CARE は、人間的にはどちらも
-  // 「休日出勤＋今の仕事」という同じ話なので同一Groupとして扱う。
-  if(interpretationFamily==='CURRENT_TASK_CONTEXT'||k==='current_task')return 'HOLIDAY_CURRENT_WORK';
-  if(interpretationFamily==='CARE'){
-    if(intent.ctx.currentTask&&m==='HOLIDAY_WORK_CARE')return 'HOLIDAY_CURRENT_WORK';
-    return 'HOLIDAY_CARE';
+  if(!intent||!intent.ctx)return null;
+  const kind=String(intent.ctx.kind||''),m=String((cand&&cand.semanticMeaning)||''),k=String((cand&&cand.key)||'');
+
+  // 休日出勤：FinalMizukiで成立したMeaning分散をそのまま維持する。
+  if(kind==='holiday_work'){
+    if(interpretationFamily==='APPRECIATION')return 'HOLIDAY_APPRECIATION';
+    if(interpretationFamily==='CONTRAST')return 'HOLIDAY_CONTRAST';
+    // CURRENT_TASK_CONTEXT と、現在業務名を含む CARE は、人間的にはどちらも
+    // 「休日出勤＋今の仕事」という同じ話なので同一Groupとして扱う。
+    if(interpretationFamily==='CURRENT_TASK_CONTEXT'||k==='current_task')return 'HOLIDAY_CURRENT_WORK';
+    if(interpretationFamily==='CARE'){
+      if(intent.ctx.currentTask&&m==='HOLIDAY_WORK_CARE')return 'HOLIDAY_CURRENT_WORK';
+      return 'HOLIDAY_CARE';
+    }
+    if(interpretationFamily==='STATE_ACKNOWLEDGEMENT')return 'HOLIDAY_STATE';
+    return null;
   }
-  if(interpretationFamily==='STATE_ACKNOWLEDGEMENT')return 'HOLIDAY_STATE';
+
+  // 最終共通ガード：Interpretation付き発話と、その土台となった元FACTを同一の主意味へ束ねる。
+  // 対象は、人間評価で近接重複が確認された狭いシナリオだけに限定する。
+  if(kind==='end_2h'){
+    // 「まだXを続けている＋長い一日」と「まだXを続けている」は同じ主FACT。
+    // 終業からの経過時間そのもの／労い／完了実績は別Meaningとして残す。
+    if(k==='current_task'||(m==='LONG_OVERTIME_CARE'&&!!intent.ctx.currentTask))return 'LONG_WORK_CURRENT_TASK';
+    return null;
+  }
+
+  if(kind==='multi_done'){
+    // 「今日は結構進んだ」と「いくつか片づいた」は同じ進捗解釈。
+    // 具体的な完了業務名や、完了→現在業務の接続は別Meaningとして残す。
+    if(m==='MULTIPLE_COMPLETED_ACK'||m==='MULTIPLE_COMPLETED_APPRECIATION')return 'MULTIPLE_COMPLETED_PROGRESS';
+    return null;
+  }
+
   return null;
 }
 function mvMizukiHumanLayer(intent,cand){
@@ -1079,6 +1101,9 @@ function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic
   const layer=humanLayer||mvMizukiHumanLayer(intent,cand);
   let score=100-index*2+(cand.utteranceValue||0)+mvMizukiScenarioRelevance(intent,cand)+(layer.attentionScore||0);
   if(layer.intent==='APPRECIATE')score+=7;
+  // 複数完了の同一CoreMeaningでは、単なる進捗読み上げより既存の自然な労いを代表候補としてわずかに優先する。
+  // これによりAPPRECIATIONを維持しつつ、その直後の同義ACKはCoreMeaningGuardで止める。
+  if(intent.ctx.kind==='multi_done'&&cand.semanticMeaning==='MULTIPLE_COMPLETED_APPRECIATION')score+=5;
   if(layer.intent==='CARE')score+=4;
   if(layer.intent==='ACKNOWLEDGE')score+=5;
   if(layer.intent==='CONNECT')score-=10;
@@ -1088,13 +1113,13 @@ function mvMizukiValidationCandidateScore(intent,cand,index,usedTopics,lastTopic
   // 同じInterpretation Familyだけを強く下げ、別Familyは高価値候補として残す。
   if(intent.ctx.kind==='holiday_work'&&layer.interpretationFamily){
     if(usedInterpretationFamilies&&usedInterpretationFamilies.has(layer.interpretationFamily))score-=90;
-    // Final Mizuki: Family名が別でも上位Meaning Groupが同じなら近接再利用を強く下げる。
-    // 例：CURRENT_TASK_CONTEXT と「休日にも資料確認を進めている」CARE。
-    if(layer.interpretationMeaningGroup&&usedInterpretationMeaningGroups&&usedInterpretationMeaningGroups.has(layer.interpretationMeaningGroup))score-=110;
     // APPRECIATIONの直後に単純なHOLIDAY_WORK_STATE言い換えへ戻るより、
     // CURRENT_TASK_CONTEXT / CONTRAST / CAREを優先する。
     if(usedMeanings.has('HOLIDAY_WORK_APPRECIATION')&&cand.semanticMeaning==='HOLIDAY_WORK_STATE')score-=58;
   }
+  // FinalMizuki共通ガード：Family名・文章が違っても、同じ主意味Groupの近接再利用を強く下げる。
+  // Groupを付与する範囲を狭く限定しているため、現在業務中のFACT分散は一括抑制しない。
+  if(layer.interpretationMeaningGroup&&usedInterpretationMeaningGroups&&usedInterpretationMeaningGroups.has(layer.interpretationMeaningGroup))score-=110;
   if(cand.speechKind==='noNewInformation')score-=70;     // 通常candidateとしては採用しない
   if(cand.key.startsWith('generic_'))score-=48;
 
@@ -1139,9 +1164,10 @@ function mvMizukiCandidateHasNewHighValue(intent,cand,score,usedMeanings,usedGro
   // Stage10: 休日出勤はAttention全体ではなくFamily単位で消費する。
   // 同一Familyの言い換えは再利用しないが、別Familyは残す。
   if(intent.ctx.kind==='holiday_work'&&layer.interpretationFamily&&usedInterpretationFamilies&&usedInterpretationFamilies.has(layer.interpretationFamily))return false;
-  // Final Mizuki: 同一5件内では、人間的に同じ話のMeaning Groupを近接再利用しない。
-  // 未使用の別Group／Small Talkがなくなった後は、低価値言い換えで埋めずQUIETへ進む。
-  if(intent.ctx.kind==='holiday_work'&&layer.interpretationMeaningGroup&&usedInterpretationMeaningGroups&&usedInterpretationMeaningGroups.has(layer.interpretationMeaningGroup))return false;
+  // FinalMizuki共通ガード：同一5件内では、人間的に同じ主意味Groupを近接再利用しない。
+  // Interpretation付き発話→元FACT、元FACT→Interpretation付き発話の両方向を同じ判定で止める。
+  // 別Meaningは抑制せず、高価値な別MeaningがなければQUIETへ進む。
+  if(layer.interpretationMeaningGroup&&usedInterpretationMeaningGroups&&usedInterpretationMeaningGroups.has(layer.interpretationMeaningGroup))return false;
 
   const dailyGroup=mvMizukiDailyFrequencyGroup(cand.semanticMeaning,cand.speechKind);
   // Stage9 holiday-work fix: daily frequency is a soft preference for the scenario's Primary Attention.
@@ -1247,7 +1273,7 @@ function mvGenerateRecords(ctx,persona,count,batchId){
     }else finalText=mvRenderComment(intent,persona,seed,used);
     // 凛・麗華の既存経路は変更せず、共通のbatch内最終表示重複guardだけ維持。
     used.add(finalText);
-    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,attention,interpretationFamily,interpretationMeaningGroup,interpretation,intentType,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'final-mizuki-interpretation-family-guard':null}});
+    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,attention,interpretationFamily,interpretationMeaningGroup,interpretation,intentType,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'final-mizuki-core-meaning-guard':null}});
   }
   return out;
 }
