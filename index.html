@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<title>Mizuki Conversation Lab v0.2.4.2+MizukiUtteranceValueFix</title>
+<title>Mizuki Conversation Lab v0.2.4.2 FinalMizuki PostQuietGuard</title>
 <style>
 :root{
   --bg:#f5f6f8;--panel:#ffffff;--text:#17181b;--sub:#6f737b;--line:#e6e8ec;
@@ -217,7 +217,7 @@ button{touch-action:manipulation}
       <button class="action danger" data-clear="evaluations">評価データをクリア</button>
     </div>
     <button class="close" id="closeSettings">閉じる</button>
-    <div class="version">Mizuki Conversation Lab v0.2.4.2 FinalMizuki · CoreMeaningGuard / HumanNatural</div>
+    <div class="version">Mizuki Conversation Lab v0.2.4.2 FinalMizuki · CoreMeaningGuard / PostQuietGuard / HumanNatural</div>
   </div>
 </div>
 
@@ -225,7 +225,7 @@ button{touch-action:manipulation}
 (() => {
 'use strict';
 
-const VERSION='0.2.4.2-final-mizuki-core-meaning-guard-human-natural';
+const VERSION='0.2.4.2-final-mizuki-core-meaning-guard-post-quiet-guard-human-natural';
 const K={
   settings:'mcl_settings_v012',
   history:'mcl_history_v012',
@@ -706,6 +706,49 @@ function mvMizukiStateKey(ctx){
   }
   return [ctx.kind||'',ctx.workStatus||'',timeBucket,ctx.currentTask||'',ctx.currentStart||'',ctx.currentEnd||'',ctx.nextPlan||'',ctx.nextPlanTime||'',String(Number(ctx.unplacedMinutes)||0),(ctx.completedTasks||[]).join('>'),ctx.change||''].join('||');
 }
+
+// ---- 2026-08-24 FinalMizuki: QUIET到達後の会話状態ガード（Labのみ） ----
+// 1〜2分の単純経過ではQUIETを解除せず、会話上意味のある時間境界だけをstateへ含める。
+function mvMizukiMeaningfulTimeBand(ctx){
+  const d=new Date(ctx.dateTime);if(Number.isNaN(d.getTime()))return '';
+  const h=d.getHours();
+  const daypart=h<12?'MORNING':h===12?'NOON':h<16?'AFTERNOON':h<19?'EVENING':'NIGHT';
+  const band=(n)=>n===null?'NONE':n<0?'PASSED':n<=5?'WITHIN_5':n<=10?'WITHIN_10':n<=30?'WITHIN_30':'LATER';
+  return [daypart,band(mvMinutesUntil(ctx.nextPlanTime,ctx.dateTime)),band(mvMinutesUntil(ctx.currentEnd,ctx.dateTime))].join('|');
+}
+function mvMizukiConversationStateKey(ctx){
+  const unplaced=Math.max(0,Number(ctx.unplacedMinutes)||0),unplacedBucket=Math.round(unplaced/15)*15;
+  return [
+    mvMizukiDateKey(ctx.dateTime),ctx.kind||'',ctx.workStatus||'',mvMizukiMeaningfulTimeBand(ctx),
+    ctx.currentTask||'',ctx.currentStart||'',ctx.currentEnd||'',ctx.nextPlan||'',ctx.nextPlanTime||'',
+    String(unplacedBucket),(ctx.completedTasks||[]).join('>'),ctx.change||''
+  ].join('||');
+}
+function mvMizukiPostQuietActiveFromHistory(ctx){
+  const stateKey=mvMizukiConversationStateKey(ctx),preset=String(ctx.presetKey||''),day=mvMizukiDateKey(ctx.dateTime);
+  let enteredSameState=false;
+  for(let i=minimoValidation.records.length-1;i>=0;i--){
+    const r=minimoValidation.records[i];
+    if(!r||r.persona!=='mizuki'||!String(r.batchId||'').startsWith('single-')||!r.scenario)continue;
+    if(preset&&String(r.scenario.presetKey||'')!==preset)continue;
+    if(mvMizukiDateKey(r.scenario.dateTime)!==day)continue;
+    const recKey=mvMizukiConversationStateKey(r.scenario);
+    if(!enteredSameState){
+      // 直近の同preset状態が現在と違えば、意味のある変化が起きたのでQUIETを解除する。
+      if(recKey!==stateKey)return false;
+      enteredSameState=true;
+    }else if(recKey!==stateKey)break;
+    const logic=r.labLogic||{};
+    if(logic.postQuietHold===true||logic.semanticMeaning==='QUIET_RESPONSE')return true;
+  }
+  return false;
+}
+function mvRenderMizukiPostQuiet(intent){
+  // Labはコメントカード表示が必須なので、QUIET到達後は同じ沈黙表現を維持する。
+  // generic fallbackへ戻すより、人間の「もう話すことがない」状態を優先する。
+  return {text:'……。',topic:'conversation_post_quiet',speechKind:'exhaustion',semanticMeaning:'QUIET_RESPONSE',semanticAngle:'QUIET_RESPONSE',exhausted:true,postQuietHold:true,attention:'NO_NEW_HIGH_VALUE',interpretation:'NO_NEW_VALUE_TO_SAY',intentType:'QUIET'};
+}
+
 function mvMizukiSemanticGroup(intent,meaning,angle){
   const kind=intent.ctx.kind,m=meaning||'',a=angle||'';
   if(/^SMALLTALK_/.test(m))return 'SMALLTALK_STATE';
@@ -1246,23 +1289,29 @@ function mvGenerateRecords(ctx,persona,count,batchId){
   const historicalUsed=new Set(minimoValidation.records.filter(r=>r.persona===persona).map(r=>r.finalText).filter(Boolean));
   const used=persona==='mizuki'?new Set():new Set(historicalUsed); // 美月だけbatch内hard guard。凛・麗華の既存重複防止は変更しない。
   const out=[];const usedTopics=new Set(),usedMeanings=new Set(),usedAngles=new Set(),usedGroups=new Set(),usedInterpretations=new Set(),usedInterpretationFamilies=new Set(),usedInterpretationMeaningGroups=new Set();let lastTopic=null,lastMeaning=null,lastInterpretation=null;
-  let exhaustionStateKey=null;const dailyGroups=new Set();
+  let exhaustionStateKey=null,conversationStateKey=null,postQuietActive=false;const dailyGroups=new Set();
   if(persona==='mizuki'){
     // stateKey / continuity / daily frequencyは既存履歴を参照してよいが、
     // scenario FACTのcandidate consumptionには持ち込まない。
     exhaustionStateKey=mvMizukiStateKey(ctx);
+    conversationStateKey=mvMizukiConversationStateKey(ctx);
+    // 単発検証だけ、直近の同一状態でQUIETへ到達済みかを引き継ぐ。
+    // 25/100件一括生成は人間の連続呼び出しではないため履歴QUIETを持ち込まない。
+    postQuietActive=String(batchId||'').startsWith('single-')&&mvMizukiPostQuietActiveFromHistory(ctx);
     mvMizukiDailyUsage(ctx).forEach(x=>dailyGroups.add(x));
   }
   for(let i=0;i<count;i++){
     const seed=(Number(ctx.presetKey)||1)*101+i*17+minimoValidation.records.length;
     let finalText,semanticFocus=null,speechKind=null,semanticMeaning=null,semanticAngle=null,attention=null,interpretationFamily=null,interpretationMeaningGroup=null,interpretation=null,intentType=null,exhaustionGroup=null,exhausted=false;
     if(persona==='mizuki'){
-      let rendered=mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,usedInterpretationMeaningGroups,historicalUsed);
-      // 最終表示文の絶対guard。同一batchで一致した場合は別seedで再選択する。
-      for(let retry=0;retry<8&&rendered&&used.has(rendered.text);retry++){
+      let rendered=postQuietActive?mvRenderMizukiPostQuiet(intent):mvRenderMizukiValidation(intent,seed,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,usedInterpretationMeaningGroups,historicalUsed);
+      // 通常発話は同一batch finalTextをhard guardする。
+      // post-QUIETは「沈黙状態の維持」そのものなので、generic fallbackへ復活させるための再選択を行わない。
+      for(let retry=0;retry<8&&rendered&&!rendered.postQuietHold&&used.has(rendered.text);retry++){
         rendered=mvRenderMizukiValidation(intent,seed+(retry+1)*997,used,usedTopics,lastTopic,usedMeanings,usedAngles,lastMeaning,usedGroups,dailyGroups,usedInterpretations,lastInterpretation,usedInterpretationFamilies,usedInterpretationMeaningGroups,historicalUsed);
       }
       finalText=rendered.text;semanticFocus=rendered.topic;speechKind=rendered.speechKind;semanticMeaning=rendered.semanticMeaning||rendered.topic;semanticAngle=rendered.semanticAngle||semanticMeaning;attention=rendered.attention||null;interpretationFamily=rendered.interpretationFamily||null;interpretationMeaningGroup=rendered.interpretationMeaningGroup||null;interpretation=rendered.interpretation||null;intentType=rendered.intentType||null;exhausted=!!rendered.exhausted;
+      if(exhausted&&semanticMeaning==='QUIET_RESPONSE')postQuietActive=true;
       exhaustionGroup=exhausted?`CONVERSATION_EXHAUSTION:${semanticMeaning}`:mvMizukiSemanticGroup(intent,semanticMeaning,semanticAngle);
       usedTopics.add(rendered.topic);lastTopic=rendered.topic;lastMeaning=semanticMeaning;lastInterpretation=interpretation;
       usedMeanings.add(semanticMeaning);usedAngles.add(semanticAngle);if(interpretation)usedInterpretations.add(interpretation);if(interpretationFamily)usedInterpretationFamilies.add(interpretationFamily);if(interpretationMeaningGroup)usedInterpretationMeaningGroups.add(interpretationMeaningGroup);
@@ -1273,7 +1322,7 @@ function mvGenerateRecords(ctx,persona,count,batchId){
     }else finalText=mvRenderComment(intent,persona,seed,used);
     // 凛・麗華の既存経路は変更せず、共通のbatch内最終表示重複guardだけ維持。
     used.add(finalText);
-    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,attention,interpretationFamily,interpretationMeaningGroup,interpretation,intentType,exhaustionStateKey,exhaustionGroup,exhausted,humanContextLayer:persona==='mizuki'?'final-mizuki-core-meaning-guard':null}});
+    out.push({id:uid(),batchId,scenario:{...ctx},persona,finalText,evaluation:null,improvedText:'',at:new Date().toISOString(),labLogic:{factType:intent.type,humanReception:intent.value,speakValue:intent.recommendation,semanticFocus,speechKind,semanticMeaning,semanticAngle,attention,interpretationFamily,interpretationMeaningGroup,interpretation,intentType,exhaustionStateKey,conversationStateKey,exhaustionGroup,exhausted,postQuietHold:persona==='mizuki'&&postQuietActive&&semanticMeaning==='QUIET_RESPONSE',humanContextLayer:persona==='mizuki'?'final-mizuki-core-meaning-guard-post-quiet-guard':null}});
   }
   return out;
 }
